@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from goldenson_api.db.models.page import Page
 from goldenson_api.db.repositories.block_repository import BlockRepository
+from goldenson_api.db.repositories.file_repository import FileRepository
 from goldenson_api.db.repositories.page_repository import PageRepository
 from goldenson_api.db.repositories.workspace_repository import WorkspaceRepository
 from goldenson_api.schemas.page import PageCreate, PageUpdate, PageUpdateTitle
@@ -16,6 +17,7 @@ class PageService:
     def __init__(self, session: AsyncSession) -> None:
         self._repository = PageRepository(session)
         self._block_repository = BlockRepository(session)
+        self._file_repository = FileRepository(session)
         self._workspace_repository = WorkspaceRepository(session)
 
     async def create_page(self, payload: PageCreate) -> Page:
@@ -109,6 +111,7 @@ class PageService:
                     changed = True
 
         await self._block_repository.delete_for_pages(list(descendants))
+        await self._file_repository.detach_from_pages(list(descendants))
         deleted = await self._repository.delete_subtree(list(descendants))
         if deleted != len(descendants):
             raise NotFoundError("page not found")

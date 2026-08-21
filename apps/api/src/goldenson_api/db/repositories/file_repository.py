@@ -1,6 +1,6 @@
 from typing import cast
 
-from sqlalchemy import Result, delete, select
+from sqlalchemy import Result, delete, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,6 +48,26 @@ class FileRepository:
         )
         result: Result[tuple[FileMetadata]] = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_for_page(self, page_id: str) -> list[FileMetadata]:
+        stmt = (
+            select(FileMetadata)
+            .where(FileMetadata.page_id == page_id)
+            .order_by(FileMetadata.created_at.asc())
+        )
+        result: Result[tuple[FileMetadata]] = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def detach_from_pages(self, page_ids: list[str]) -> int:
+        if not page_ids:
+            return 0
+        result = cast(
+            CursorResult[tuple[object]],
+            await self._session.execute(
+                update(FileMetadata).where(FileMetadata.page_id.in_(page_ids)).values(page_id=None)
+            ),
+        )
+        return int(result.rowcount or 0)
 
     async def delete_by_id(self, file_id: str) -> bool:
         result = cast(

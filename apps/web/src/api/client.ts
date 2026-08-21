@@ -33,12 +33,12 @@ async function parseBody(response: Response): Promise<unknown> {
 }
 
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = init?.body instanceof FormData
+    ? { ...(init?.headers ?? {}) }
+    : { 'Content-Type': 'application/json', ...(init?.headers ?? {}) }
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers,
   })
 
   const body = await parseBody(response)

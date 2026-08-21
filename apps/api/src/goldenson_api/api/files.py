@@ -1,22 +1,20 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from goldenson_api.api.dependencies import get_db_session
 from goldenson_api.api.transaction import run_mutation
-from goldenson_api.schemas.file_metadata import (
-    FileMetadataCreate,
-    FileMetadataCreateRequest,
-    FileMetadataListResponse,
-    FileMetadataRead,
-)
+from goldenson_api.schemas.file_metadata import FileMetadataListResponse, FileMetadataRead
 from goldenson_api.services.errors import NotFoundError
 from goldenson_api.services.file_service import FileService
 
 router = APIRouter(tags=["Files"])
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]
+UploadPart = File(...)
+PagePart = Form(default=None)
 
 
 @router.get(
@@ -37,29 +35,42 @@ async def list_files(
     "/workspaces/{workspace_id}/files",
     response_model=FileMetadataRead,
     status_code=status.HTTP_201_CREATED,
-    summary="Create file metadata",
+    summary="Upload file",
 )
-async def create_file_metadata(
+async def upload_file(
     workspace_id: UUID,
-    payload: FileMetadataCreateRequest,
     session: DbSession,
+    upload: UploadFile = UploadPart,
+    page_id: UUID | None = PagePart,
 ) -> FileMetadataRead:
     service = FileService(session)
+    uploaded: list[str] = []
 
     async def action() -> FileMetadataRead:
-        file_metadata = await service.create_file(
-            FileMetadataCreate(
-                workspace_id=str(workspace_id),
-                page_id=None if payload.page_id is None else str(payload.page_id),
-                name=payload.name,
-                storage_key=payload.storage_key,
-                mime_type=payload.mime_type,
-                size=payload.size,
-            )
+        file_metadata = await service.upload_file(
+            workspace_id=str(workspace_id),
+            page_id=None if page_id is None else str(page_id),
+            upload=upload,
         )
+        uploaded.append(file_metadata.storage_key)
         return FileMetadataRead.model_validate(file_metadata)
 
-    return await run_mutation(session, action)
+    async def cleanup() -> None:
+        if uploaded:
+            service.cleanup_file(uploaded[0])
+
+    return await run_mutation(session, action, cleanup)
+
+
+@router.get(
+    "/pages/{page_id}/files",
+    response_model=FileMetadataListResponse,
+    summary="List page attachments",
+)
+async def list_page_files(page_id: UUID, session: DbSession) -> FileMetadataListResponse:
+    service = FileService(session)
+    files = await service.list_page_files(str(page_id))
+    return FileMetadataListResponse(items=[FileMetadataRead.model_validate(item) for item in files])
 
 
 @router.get("/files/{file_id}", response_model=FileMetadataRead, summary="Get file metadata")
@@ -72,6 +83,16 @@ async def get_file_metadata(
     if file_metadata is None:
         raise NotFoundError("file metadata not found")
     return FileMetadataRead.model_validate(file_metadata)
+
+
+@router.get("/files/{file_id}/download", summary="Download file")
+async def download_file(file_id: UUID, session: DbSession) -> FileResponse:
+    service = FileService(session)
+    file_metadata = await service.get_file(str(file_id))
+    if file_metadata is None:
+        raise NotFoundError("file metadata not found")
+    path = service.download_path(file_metadata)
+    return FileResponse(path, media_type=file_metadata.mime_type, filename=file_metadata.name)
 
 
 @router.delete(

@@ -9,7 +9,9 @@ from goldenson_api.services.errors import (
     BadRequestError,
     ConcurrencyConflictError,
     ConflictError,
+    FileTooLargeError,
     NotFoundError,
+    StorageError,
 )
 
 
@@ -53,6 +55,20 @@ def register_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content=_error_payload("BAD_REQUEST", str(exc)),
+        )
+
+    @app.exception_handler(FileTooLargeError)
+    async def file_too_large_handler(_: Request, exc: FileTooLargeError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            content=_error_payload("FILE_TOO_LARGE", str(exc)),
+        )
+
+    @app.exception_handler(StorageError)
+    async def storage_handler(_: Request, exc: StorageError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=_error_payload("STORAGE_ERROR", str(exc)),
         )
 
     @app.exception_handler(RequestValidationError)

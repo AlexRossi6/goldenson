@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from alembic import command
 from goldenson_api.api.dependencies import get_db_session
+from goldenson_api.core.config import get_settings
 from goldenson_api.main import create_app
 
 
@@ -50,7 +51,13 @@ async def session(session_factory: async_sessionmaker[AsyncSession]) -> AsyncIte
 
 
 @pytest.fixture()
-def api_client(migrated_db_url: str) -> Iterator[TestClient]:
+def api_client(
+    migrated_db_url: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[TestClient]:
+    monkeypatch.setenv("GOLDENSON_STORAGE_ROOT", str(tmp_path / "files"))
+    get_settings.cache_clear()
     engine = create_async_engine(migrated_db_url, future=True)
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -66,3 +73,4 @@ def api_client(migrated_db_url: str) -> Iterator[TestClient]:
 
     app.dependency_overrides.clear()
     asyncio.run(engine.dispose())
+    get_settings.cache_clear()

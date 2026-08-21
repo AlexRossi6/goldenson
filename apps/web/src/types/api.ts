@@ -40,7 +40,6 @@ export type FileMetadata = {
   workspace_id: string
   page_id: string | null
   name: string
-  storage_key: string
   mime_type: string
   size: number
   created_at: string

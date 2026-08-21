@@ -83,6 +83,79 @@ body {
   color: var(--muted-ink);
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.file-area {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.editor-shell > .file-area {
+  margin-top: 0.5rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.file-area-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.file-count,
+.file-item > span,
+.file-empty,
+.file-error {
+  color: var(--muted-ink);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.7rem;
+}
+
+.file-list {
+  display: grid;
+  gap: 0.35rem;
+  max-height: 180px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.file-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.35rem;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+.file-link {
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-error {
+  margin: 0;
+  color: var(--coral);
+}
+
 .create-row,
 .new-block-grid,
 .move-grid,

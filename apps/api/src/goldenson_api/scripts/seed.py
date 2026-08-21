@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+from io import BytesIO
 
+from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import Headers
 
 from goldenson_api.core.config import get_settings
 from goldenson_api.db.repositories.block_repository import BlockRepository
 from goldenson_api.db.session import create_engine_and_sessionmaker
 from goldenson_api.schemas.block import BlockCreate
-from goldenson_api.schemas.file_metadata import FileMetadataCreate
 from goldenson_api.schemas.page import PageCreate
 from goldenson_api.schemas.workspace import WorkspaceCreate
 from goldenson_api.services.block_service import BlockService
@@ -161,36 +163,25 @@ async def seed(database_url: str | None = None) -> None:
 
         file_service = FileService(session)
         file_examples = [
-            FileMetadataCreate(
-                workspace_id=workspace.id,
-                page_id=weekly_notes_page_id,
-                name="benchmark-results.csv",
-                storage_key="seed/benchmark-results.csv",
-                mime_type="text/csv",
-                size=18432,
-            ),
-            FileMetadataCreate(
-                workspace_id=workspace.id,
-                page_id=projects_page_id,
-                name="architecture-sketch.png",
-                storage_key="seed/architecture-sketch.png",
-                mime_type="image/png",
-                size=95321,
-            ),
-            FileMetadataCreate(
-                workspace_id=workspace.id,
-                page_id=None,
-                name="roadmap-notes.md",
-                storage_key="seed/roadmap-notes.md",
-                mime_type="text/markdown",
-                size=2409,
-            ),
+            (weekly_notes_page_id, "benchmark-results.csv", "text/csv", b"metric,value\n"),
+            (projects_page_id, "architecture-sketch.png", "image/png", b"seed image placeholder"),
+            (None, "roadmap-notes.md", "text/markdown", b"# Roadmap notes\n"),
         ]
 
-        for file_payload in file_examples:
-            existing = await file_service.get_by_storage_key(file_payload.storage_key)
-            if existing is None:
-                await file_service.create_file(file_payload)
+        existing_names = {
+            file.name for file in await file_service.list_workspace_files(workspace.id)
+        }
+        for page_id, name, mime_type, content in file_examples:
+            if name not in existing_names:
+                await file_service.upload_file(
+                    workspace.id,
+                    page_id,
+                    UploadFile(
+                        filename=name,
+                        file=BytesIO(content),
+                        headers=Headers({"content-type": mime_type}),
+                    ),
+                )
 
         await session.commit()
 

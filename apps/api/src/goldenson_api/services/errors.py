@@ -12,3 +12,11 @@ class ConflictError(Exception):
 
 class BadRequestError(Exception):
     """Raised when request data fails domain-level validation."""
+
+
+class FileTooLargeError(Exception):
+    """Raised when an uploaded file exceeds the configured limit."""
+
+
+class StorageError(Exception):
+    """Raised when local file storage cannot complete an operation."""

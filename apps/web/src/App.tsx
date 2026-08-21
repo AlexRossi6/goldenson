@@ -2,16 +2,18 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { createBlock, deleteBlock, listBlocks, updateBlock } from './api/blocks'
+import { deleteFile, listFiles, listPageFiles, uploadFile } from './api/files'
 import { createPage, deletePage, getPage, listPages, updatePage } from './api/pages'
 import { createWorkspace, listWorkspaces } from './api/workspaces'
 import { PageEditor } from './components/pages/PageEditor'
 import { MovePageDialog } from './components/pages/MovePageDialog'
 import { PageTree } from './components/sidebar/PageTree'
+import { FileArea } from './components/files/FileArea'
 import { NewPageForm } from './components/sidebar/NewPageForm'
 import { ConfirmDialog } from './components/ui/ConfirmDialog'
 import { InlineNotice } from './components/ui/InlineNotice'
 import { useUiStore } from './stores/ui'
-import { ApiClientError, type Block, type Page } from './types/api'
+import { ApiClientError, type Block, type FileMetadata, type Page } from './types/api'
 
 function App() {
   const queryClient = useQueryClient()
@@ -20,7 +22,7 @@ function App() {
   const [pageDraftParentId, setPageDraftParentId] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [moveDialogOpen, setMoveDialogOpen] = useState(false)
-  const [deleteTarget, setDeleteTarget] = useState<{ kind: 'page' | 'block'; page?: Page; block?: Block } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: 'page' | 'block' | 'file'; page?: Page; block?: Block; file?: FileMetadata } | null>(null)
 
   const selectedPageId = useUiStore((state) => state.selectedPageId)
   const sidebarOpen = useUiStore((state) => state.sidebarOpen)
@@ -45,6 +47,18 @@ function App() {
   })
 
   const pageList = useMemo(() => pagesQuery.data?.items ?? [], [pagesQuery.data?.items])
+
+  const filesQuery = useQuery({
+    queryKey: ['files', workspaceId],
+    queryFn: () => listFiles(workspaceId ?? ''),
+    enabled: Boolean(workspaceId),
+  })
+
+  const pageFilesQuery = useQuery({
+    queryKey: ['page-files', selectedPageId],
+    queryFn: () => listPageFiles(selectedPageId ?? ''),
+    enabled: Boolean(selectedPageId),
+  })
 
   const pageQuery = useQuery({
     queryKey: ['page', selectedPageId],
@@ -118,6 +132,7 @@ function App() {
     mutationFn: deletePage,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['pages', workspaceId] })
+      await queryClient.invalidateQueries({ queryKey: ['files', workspaceId] })
       setSelectedPageId(null)
       setErrorMessage(null)
     },
@@ -187,6 +202,27 @@ function App() {
       }
       setErrorMessage('Failed to delete block.')
     },
+  })
+
+  const uploadFileMutation = useMutation({
+    mutationFn: ({ file, pageId }: { file: File; pageId: string | null }) => uploadFile(workspaceId ?? '', file, pageId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['files', workspaceId] })
+      await queryClient.invalidateQueries({ queryKey: ['page-files', selectedPageId] })
+      setErrorMessage(null)
+    },
+    onError: (error) => setErrorMessage(error instanceof ApiClientError ? error.message : 'Could not add this file.'),
+  })
+
+  const deleteFileMutation = useMutation({
+    mutationFn: deleteFile,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['files', workspaceId] })
+      await queryClient.invalidateQueries({ queryKey: ['page-files', selectedPageId] })
+      setDeleteTarget(null)
+      setErrorMessage(null)
+    },
+    onError: (error) => setErrorMessage(error instanceof ApiClientError ? error.message : 'Could not delete this file.'),
   })
 
   useEffect(() => {
@@ -277,11 +313,17 @@ function App() {
 
   const requestDeletePage = (page: Page) => setDeleteTarget({ kind: 'page', page })
   const requestDeleteBlock = (block: Block) => setDeleteTarget({ kind: 'block', block })
+  const requestDeleteFile = (file: FileMetadata) => setDeleteTarget({ kind: 'file', file })
   const confirmDelete = async () => {
     if (!deleteTarget) return
     if (deleteTarget.kind === 'page' && deleteTarget.page) await removePage(deleteTarget.page)
     if (deleteTarget.kind === 'block' && deleteTarget.block) await removeBlock(deleteTarget.block)
+    if (deleteTarget.kind === 'file' && deleteTarget.file) await deleteFileMutation.mutateAsync(deleteTarget.file.id)
     setDeleteTarget(null)
+  }
+
+  const addFile = async (file: File) => {
+    await uploadFileMutation.mutateAsync({ file, pageId: selectedPageId })
   }
 
   const moveCurrentPage = async (parentPageId: string | null, position: number) => {
@@ -369,6 +411,14 @@ function App() {
               onCreateChild={createChildPage}
               onDeletePage={requestDeletePage}
             />
+            <FileArea
+              title="Workspace files"
+              files={filesQuery.data?.items ?? []}
+              loading={filesQuery.isLoading}
+              uploading={false}
+              errorMessage={filesQuery.isError ? 'Files could not be loaded.' : null}
+              onDelete={requestDeleteFile}
+            />
           </>
         )}
       </aside>
@@ -402,6 +452,10 @@ function App() {
             key={selectedPage.id}
             page={selectedPage}
             blocks={selectedBlocks}
+            attachments={pageFilesQuery.data?.items ?? []}
+            attachmentsLoading={pageFilesQuery.isLoading}
+            attachmentsUploading={uploadFileMutation.isPending}
+            attachmentsError={pageFilesQuery.isError ? 'Attachments could not be loaded.' : null}
             busy={updatePageMutation.isPending}
             errorMessage={errorMessage}
             onUpdatePage={updateCurrentPage}
@@ -410,6 +464,8 @@ function App() {
             onDeleteBlock={requestDeleteBlock}
             onRequestMove={() => setMoveDialogOpen(true)}
             onRequestDelete={() => requestDeletePage(selectedPage)}
+            onUploadAttachment={addFile}
+            onDeleteAttachment={requestDeleteFile}
           />
         )}
 
@@ -421,10 +477,10 @@ function App() {
       {selectedPage && <MovePageDialog key={`${selectedPage.id}-${moveDialogOpen}`} page={selectedPage} pages={pageList} open={moveDialogOpen} busy={updatePageMutation.isPending} onCancel={() => setMoveDialogOpen(false)} onMove={moveCurrentPage} />}
       <ConfirmDialog
         open={Boolean(deleteTarget)}
-        title={deleteTarget?.kind === 'page' ? 'Delete page?' : 'Delete block?'}
-        message={deleteTarget?.kind === 'page' && deleteTarget.page ? `This will permanently delete “${deleteTarget.page.title}” and all of its child pages and blocks.` : 'This will permanently remove this piece of content.'}
-        confirmLabel={deleteTarget?.kind === 'page' ? 'Delete page' : 'Delete block'}
-        busy={deletePageMutation.isPending || deleteBlockMutation.isPending}
+        title={deleteTarget?.kind === 'page' ? 'Delete page?' : deleteTarget?.kind === 'file' ? 'Remove file?' : 'Delete block?'}
+        message={deleteTarget?.kind === 'page' && deleteTarget.page ? `This will permanently delete “${deleteTarget.page.title}” and all of its child pages and blocks.` : deleteTarget?.kind === 'file' && deleteTarget.file ? `This will permanently remove “${deleteTarget.file.name}” from your workspace.` : 'This will permanently remove this piece of content.'}
+        confirmLabel={deleteTarget?.kind === 'page' ? 'Delete page' : deleteTarget?.kind === 'file' ? 'Remove file' : 'Delete block'}
+        busy={deletePageMutation.isPending || deleteBlockMutation.isPending || deleteFileMutation.isPending}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void confirmDelete()}
       />

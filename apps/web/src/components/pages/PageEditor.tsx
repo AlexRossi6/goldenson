@@ -1,12 +1,17 @@
 import { useState } from 'react'
 
-import type { Block, Page } from '../../types/api'
+import type { Block, FileMetadata, Page } from '../../types/api'
 import { BlockEditor } from '../blocks/BlockEditor'
+import { FileArea } from '../files/FileArea'
 import { InlineNotice } from '../ui/InlineNotice'
 
 type PageEditorProps = {
   page: Page
   blocks: Block[]
+  attachments: FileMetadata[]
+  attachmentsLoading: boolean
+  attachmentsUploading: boolean
+  attachmentsError: string | null
   busy: boolean
   errorMessage: string | null
   onRequestMove: () => void
@@ -30,11 +35,17 @@ type PageEditorProps = {
     },
   ) => Promise<void>
   onDeleteBlock: (block: Block) => void | Promise<void>
+  onUploadAttachment: (file: File) => Promise<void>
+  onDeleteAttachment: (file: FileMetadata) => void
 }
 
 export function PageEditor({
   page,
   blocks,
+  attachments,
+  attachmentsLoading,
+  attachmentsUploading,
+  attachmentsError,
   busy,
   errorMessage,
   onUpdatePage,
@@ -43,6 +54,8 @@ export function PageEditor({
   onDeleteBlock,
   onRequestMove,
   onRequestDelete,
+  onUploadAttachment,
+  onDeleteAttachment,
 }: PageEditorProps) {
   const [titleDraft, setTitleDraft] = useState(page.title)
   const [titleStatus, setTitleStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
@@ -92,6 +105,16 @@ export function PageEditor({
         onCreateBlock={onCreateBlock}
         onUpdateBlock={onUpdateBlock}
         onDeleteBlock={async (block) => onDeleteBlock(block)}
+      />
+
+      <FileArea
+        title="Attachments"
+        files={attachments}
+        loading={attachmentsLoading}
+        uploading={attachmentsUploading}
+        errorMessage={attachmentsError}
+        onUpload={onUploadAttachment}
+        onDelete={onDeleteAttachment}
       />
     </section>
   )
