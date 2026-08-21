@@ -1,0 +1,249 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+:root {
+  --ink: #17251f;
+  --muted-ink: #4f5f56;
+  --paper: #f5f1e8;
+  --paper-deep: #e8e2d5;
+  --line: #bcc4b7;
+  --lime: #c6f24a;
+  --coral: #ff795f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background-color: var(--paper);
+  background-image: linear-gradient(rgba(23, 37, 31, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 37, 31, 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+  font-family: 'Space Grotesk', 'Trebuchet MS', sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  display: grid;
+  min-height: 100vh;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+}
+
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 2rem 1.4rem;
+  border-right: 1px solid var(--ink);
+  background: var(--paper-deep);
+}
+
+.panel-label {
+  margin: 0;
+  font-family: 'DM Mono', 'Courier New', monospace;
+  font-size: 0.76rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.side-panel h2 {
+  margin: 0;
+  font-size: 1.6rem;
+  line-height: 1.05;
+}
+
+.panel-copy {
+  margin: 0;
+  color: var(--muted-ink);
+}
+
+.main-panel {
+  width: min(1000px, calc(100% - 48px));
+  margin-inline: auto;
+  padding: 2rem 0 3rem;
+}
+
+.topbar {
+  margin-bottom: 2.5rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--muted-ink);
+  font-family: 'DM Mono', 'Courier New', monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  max-width: 650px;
+  margin: 0.85rem 0 1rem;
+  font-size: clamp(2.35rem, 7vw, 4.6rem);
+  line-height: 0.96;
+}
+
+.lead {
+  max-width: 560px;
+  margin-bottom: 0;
+  color: var(--muted-ink);
+  font-size: 1.06rem;
+}
+
+.card-grid {
+  display: grid;
+  gap: 1.2rem;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+}
+
+.status-card,
+.info-card {
+  padding: 1.2rem;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+}
+
+.status-card {
+  box-shadow: 7px 7px 0 var(--coral);
+}
+
+.info-card {
+  box-shadow: 7px 7px 0 var(--lime);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+h3 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--ink);
+  font-family: 'DM Mono', 'Courier New', monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.status-pill.is-ok {
+  background: var(--lime);
+}
+
+.status-pill.is-error {
+  background: var(--coral);
+  color: #fff;
+}
+
+.card-copy {
+  margin: 0 0 0.55rem;
+  color: var(--muted-ink);
+}
+
+.card-copy strong {
+  color: var(--ink);
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.action {
+  min-height: 42px;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--ink);
+  font-family: 'DM Mono', 'Courier New', monospace;
+  cursor: pointer;
+}
+
+.action:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.action-primary {
+  background: var(--lime);
+}
+
+.action-primary:hover {
+  background: #d6ff61;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: 'DM Mono', 'Courier New', monospace;
+  font-size: 0.75rem;
+}
+
+.error-note {
+  margin-top: 0.9rem;
+  color: #b6341d;
+  font-family: 'DM Mono', 'Courier New', monospace;
+  font-size: 0.75rem;
+}
+
+.info-card ul {
+  margin: 0.75rem 0 0;
+  padding-left: 1.2rem;
+  color: var(--muted-ink);
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .side-panel {
+    border-right: 0;
+    border-bottom: 1px solid var(--ink);
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .main-panel {
+    width: min(100% - 32px, 1000px);
+    padding-top: 1.4rem;
+  }
+
+  h1 {
+    font-size: clamp(2rem, 10vw, 3rem);
+  }
+
+  .status-card,
+  .info-card {
+    box-shadow: 5px 5px 0 var(--ink);
+  }
+}
