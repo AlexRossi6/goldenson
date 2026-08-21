@@ -1,4 +1,5 @@
 from sqlalchemy import select
+from sqlalchemy.engine import Result
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from goldenson_api.db.models.workspace import Workspace
@@ -20,3 +21,9 @@ class WorkspaceRepository:
     async def get_by_name(self, name: str) -> Workspace | None:
         result = await self._session.execute(select(Workspace).where(Workspace.name == name))
         return result.scalar_one_or_none()
+
+    async def list_all(self) -> list[Workspace]:
+        result: Result[tuple[Workspace]] = await self._session.execute(
+            select(Workspace).order_by(Workspace.created_at.asc())
+        )
+        return list(result.scalars().all())

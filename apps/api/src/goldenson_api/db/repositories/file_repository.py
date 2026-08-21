@@ -1,4 +1,7 @@
-from sqlalchemy import Result, select
+from typing import cast
+
+from sqlalchemy import Result, delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from goldenson_api.db.models.file_metadata import FileMetadata
@@ -34,6 +37,9 @@ class FileRepository:
         result: Result[tuple[FileMetadata]] = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_id(self, file_id: str) -> FileMetadata | None:
+        return await self._session.get(FileMetadata, file_id)
+
     async def list_for_workspace(self, workspace_id: str) -> list[FileMetadata]:
         stmt = (
             select(FileMetadata)
@@ -42,3 +48,10 @@ class FileRepository:
         )
         result: Result[tuple[FileMetadata]] = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def delete_by_id(self, file_id: str) -> bool:
+        result = cast(
+            CursorResult[tuple[object]],
+            await self._session.execute(delete(FileMetadata).where(FileMetadata.id == file_id)),
+        )
+        return bool((result.rowcount or 0) == 1)

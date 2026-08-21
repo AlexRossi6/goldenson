@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import pytest
 from alembic.config import Config
+from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from alembic import command
+from goldenson_api.api.dependencies import get_db_session
+from goldenson_api.main import create_app
 
 
 @pytest.fixture()
@@ -43,3 +47,22 @@ async def session_factory(
 async def session(session_factory: async_sessionmaker[AsyncSession]) -> AsyncIterator[AsyncSession]:
     async with session_factory() as current_session:
         yield current_session
+
+
+@pytest.fixture()
+def api_client(migrated_db_url: str) -> Iterator[TestClient]:
+    engine = create_async_engine(migrated_db_url, future=True)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    app = create_app()
+
+    async def override_get_db_session() -> AsyncIterator[AsyncSession]:
+        async with factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+    with TestClient(app) as client:
+        yield client
+
+    app.dependency_overrides.clear()
+    asyncio.run(engine.dispose())

@@ -10,9 +10,22 @@ class BlockCreate(BaseModel):
     content: dict[str, object]
 
 
+class BlockCreateRequest(BaseModel):
+    type: str = Field(min_length=1, max_length=50)
+    position: int = Field(ge=0)
+    content: dict[str, object]
+
+
 class BlockUpdateContent(BaseModel):
     content: dict[str, object]
     expected_version: int = Field(ge=1)
+
+
+class BlockUpdate(BaseModel):
+    type: str | None = Field(default=None, min_length=1, max_length=50)
+    position: int | None = Field(default=None, ge=0)
+    content: dict[str, object] | None = None
+    version: int = Field(ge=1)
 
 
 class BlockRead(BaseModel):
@@ -26,3 +39,7 @@ class BlockRead(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class BlockListResponse(BaseModel):
+    items: list[BlockRead]

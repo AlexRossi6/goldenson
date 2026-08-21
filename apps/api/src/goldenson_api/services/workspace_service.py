@@ -12,6 +12,9 @@ class WorkspaceService:
     async def create_workspace(self, payload: WorkspaceCreate) -> Workspace:
         return await self._repository.create(name=payload.name)
 
+    async def list_workspaces(self) -> list[Workspace]:
+        return await self._repository.list_all()
+
     async def get_workspace(self, workspace_id: str) -> Workspace | None:
         return await self._repository.get_by_id(workspace_id)
 

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import cast
 
-from sqlalchemy import Result, select, update
+from sqlalchemy import Result, delete, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,3 +55,42 @@ class BlockRepository:
 
         await self._session.flush()
         return await self.get_by_id(block_id)
+
+    async def update_with_version(
+        self,
+        block_id: str,
+        *,
+        expected_version: int,
+        block_type: str | None,
+        position: int | None,
+        content: dict[str, object] | None,
+    ) -> Block | None:
+        values: dict[str, object] = {
+            "version": expected_version + 1,
+            "updated_at": _utc_now(),
+        }
+        if block_type is not None:
+            values["type"] = block_type
+        if position is not None:
+            values["position"] = position
+        if content is not None:
+            values["content"] = content
+
+        stmt = (
+            update(Block)
+            .where(Block.id == block_id, Block.version == expected_version)
+            .values(**values)
+        )
+        result = cast(CursorResult[tuple[object]], await self._session.execute(stmt))
+        if (result.rowcount or 0) != 1:
+            return None
+
+        await self._session.flush()
+        return await self.get_by_id(block_id)
+
+    async def delete_by_id(self, block_id: str) -> bool:
+        result = cast(
+            CursorResult[tuple[object]],
+            await self._session.execute(delete(Block).where(Block.id == block_id)),
+        )
+        return bool((result.rowcount or 0) == 1)
