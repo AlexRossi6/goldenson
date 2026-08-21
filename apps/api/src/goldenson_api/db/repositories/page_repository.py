@@ -68,6 +68,15 @@ class PageRepository:
         result: Result[tuple[Page]] = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def delete_subtree(self, page_ids: list[str]) -> int:
+        if not page_ids:
+            return 0
+        result = cast(
+            CursorResult[tuple[object]],
+            await self._session.execute(delete(Page).where(Page.id.in_(page_ids))),
+        )
+        return int(result.rowcount or 0)
+
     async def has_children(self, page_id: str) -> bool:
         stmt = select(func.count(Page.id)).where(Page.parent_page_id == page_id)
         count = await self._session.scalar(stmt)

@@ -36,6 +36,15 @@ class BlockRepository:
         result: Result[tuple[Block]] = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def delete_for_pages(self, page_ids: list[str]) -> int:
+        if not page_ids:
+            return 0
+        result = cast(
+            CursorResult[tuple[object]],
+            await self._session.execute(delete(Block).where(Block.page_id.in_(page_ids))),
+        )
+        return int(result.rowcount or 0)
+
     async def update_content_with_version(
         self,
         block_id: str,

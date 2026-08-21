@@ -18,9 +18,7 @@ def _error_payload(
     message: str,
     details: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    payload = ErrorResponse(
-        error=ErrorBody(code=code, message=message, details=details or {})
-    )
+    payload = ErrorResponse(error=ErrorBody(code=code, message=message, details=details or {}))
     return payload.model_dump()
 
 

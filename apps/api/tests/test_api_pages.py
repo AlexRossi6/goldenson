@@ -129,16 +129,38 @@ def test_circular_hierarchy_is_rejected(api_client: TestClient) -> None:
     assert cycle_response.json()["error"]["code"] == "BAD_REQUEST"
 
 
-def test_delete_page_with_children_conflicts(api_client: TestClient) -> None:
-    workspace_id = _create_workspace(api_client, "Delete Conflict")
+def test_delete_page_with_children_cascades(api_client: TestClient) -> None:
+    workspace_id = _create_workspace(api_client, "Delete Cascade")
     parent = _create_page(api_client, workspace_id, "Parent", 0)
     parent_id = parent.get("id")
     assert isinstance(parent_id, str)
-    _ = _create_page(api_client, workspace_id, "Child", 0, parent_id)
+    child = _create_page(api_client, workspace_id, "Child", 0, parent_id)
+    child_id = child.get("id")
+    assert isinstance(child_id, str)
+    grandchild = _create_page(api_client, workspace_id, "Grandchild", 0, child_id)
+    grandchild_id = grandchild.get("id")
+    assert isinstance(grandchild_id, str)
+    unrelated = _create_page(api_client, workspace_id, "Unrelated", 1)
+    unrelated_id = unrelated.get("id")
+    assert isinstance(unrelated_id, str)
+
+    for page_id, text in (
+        (parent_id, "parent block"),
+        (child_id, "child block"),
+        (grandchild_id, "grandchild block"),
+    ):
+        block_response = api_client.post(
+            f"/api/pages/{page_id}/blocks",
+            json={"type": "paragraph", "position": 0, "content": {"text": text}},
+        )
+        assert block_response.status_code == 201
 
     response = api_client.delete(f"/api/pages/{parent_id}")
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == "CONFLICT"
+    assert response.status_code == 204
+    assert api_client.get(f"/api/pages/{parent_id}").status_code == 404
+    assert api_client.get(f"/api/pages/{child_id}").status_code == 404
+    assert api_client.get(f"/api/pages/{grandchild_id}").status_code == 404
+    assert api_client.get(f"/api/pages/{unrelated_id}").status_code == 200
 
 
 def test_page_concurrency_conflict(api_client: TestClient) -> None:

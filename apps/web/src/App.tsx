@@ -1,91 +1,433 @@
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { fetchHealth } from './api/health'
-import { useUiStore } from './store/ui'
+import { createBlock, deleteBlock, listBlocks, updateBlock } from './api/blocks'
+import { createPage, deletePage, getPage, listPages, updatePage } from './api/pages'
+import { createWorkspace, listWorkspaces } from './api/workspaces'
+import { PageEditor } from './components/pages/PageEditor'
+import { MovePageDialog } from './components/pages/MovePageDialog'
+import { PageTree } from './components/sidebar/PageTree'
+import { NewPageForm } from './components/sidebar/NewPageForm'
+import { ConfirmDialog } from './components/ui/ConfirmDialog'
+import { InlineNotice } from './components/ui/InlineNotice'
+import { useUiStore } from './stores/ui'
+import { ApiClientError, type Block, type Page } from './types/api'
 
 function App() {
-  const autoRefresh = useUiStore((state) => state.autoRefresh)
-  const setAutoRefresh = useUiStore((state) => state.setAutoRefresh)
+  const queryClient = useQueryClient()
+  const [workspaceDraft, setWorkspaceDraft] = useState('')
+  const [pageDraftTitle, setPageDraftTitle] = useState('')
+  const [pageDraftParentId, setPageDraftParentId] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [moveDialogOpen, setMoveDialogOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: 'page' | 'block'; page?: Page; block?: Block } | null>(null)
 
-  const healthQuery = useQuery({
-    queryKey: ['api-health'],
-    queryFn: fetchHealth,
-    refetchInterval: autoRefresh ? 15000 : false,
-    retry: 1,
+  const selectedPageId = useUiStore((state) => state.selectedPageId)
+  const sidebarOpen = useUiStore((state) => state.sidebarOpen)
+  const expandedPages = useUiStore((state) => state.expandedPages)
+  const setSelectedPageId = useUiStore((state) => state.setSelectedPageId)
+  const setSidebarOpen = useUiStore((state) => state.setSidebarOpen)
+  const setPageExpanded = useUiStore((state) => state.setPageExpanded)
+  const togglePageExpanded = useUiStore((state) => state.togglePageExpanded)
+
+  const workspaceQuery = useQuery({
+    queryKey: ['workspaces'],
+    queryFn: listWorkspaces,
   })
 
-  const lastChecked =
-    healthQuery.dataUpdatedAt > 0
-      ? new Date(healthQuery.dataUpdatedAt).toLocaleTimeString()
-      : 'not checked yet'
+  const workspace = workspaceQuery.data?.items[0] ?? null
+  const workspaceId = workspace?.id ?? null
+
+  const pagesQuery = useQuery({
+    queryKey: ['pages', workspaceId],
+    queryFn: () => listPages(workspaceId ?? ''),
+    enabled: Boolean(workspaceId),
+  })
+
+  const pageList = useMemo(() => pagesQuery.data?.items ?? [], [pagesQuery.data?.items])
+
+  const pageQuery = useQuery({
+    queryKey: ['page', selectedPageId],
+    queryFn: () => getPage(selectedPageId ?? ''),
+    enabled: Boolean(selectedPageId),
+  })
+
+  const blocksQuery = useQuery({
+    queryKey: ['blocks', selectedPageId],
+    queryFn: () => listBlocks(selectedPageId ?? ''),
+    enabled: Boolean(selectedPageId),
+  })
+
+  const createWorkspaceMutation = useMutation({
+    mutationFn: createWorkspace,
+    onSuccess: async () => {
+      setWorkspaceDraft('')
+      await queryClient.invalidateQueries({ queryKey: ['workspaces'] })
+    },
+  })
+
+  const createPageMutation = useMutation({
+    mutationFn: ({
+      workspaceId: nextWorkspaceId,
+      title,
+      parentId,
+      position,
+    }: {
+      workspaceId: string
+      title: string
+      parentId: string | null
+      position: number
+    }) =>
+      createPage(nextWorkspaceId, {
+        title,
+        parent_page_id: parentId,
+        position,
+      }),
+    onSuccess: async (createdPage) => {
+      await queryClient.invalidateQueries({ queryKey: ['pages', createdPage.workspace_id] })
+      setSelectedPageId(createdPage.id)
+      setPageExpanded(createdPage.id, true)
+      setPageDraftTitle('')
+      setPageDraftParentId(null)
+    },
+    onError: (error) => {
+      setErrorMessage(error instanceof ApiClientError ? error.message : 'Failed to create page.')
+    },
+  })
+
+  const updatePageMutation = useMutation({
+    mutationFn: ({ pageId, payload }: { pageId: string; payload: Parameters<typeof updatePage>[1] }) =>
+      updatePage(pageId, payload),
+    onSuccess: async (updatedPage) => {
+      setErrorMessage(null)
+      await queryClient.invalidateQueries({ queryKey: ['pages', updatedPage.workspace_id] })
+      await queryClient.invalidateQueries({ queryKey: ['page', updatedPage.id] })
+    },
+    onError: async (error) => {
+      if (error instanceof ApiClientError && error.code === 'CONCURRENCY_CONFLICT') {
+        setErrorMessage('This page changed elsewhere. Latest data has been reloaded.')
+      } else {
+        setErrorMessage('Failed to update page.')
+      }
+      await queryClient.invalidateQueries({ queryKey: ['page', selectedPageId] })
+      await queryClient.invalidateQueries({ queryKey: ['pages', workspaceId] })
+    },
+  })
+
+  const deletePageMutation = useMutation({
+    mutationFn: deletePage,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['pages', workspaceId] })
+      setSelectedPageId(null)
+      setErrorMessage(null)
+    },
+    onError: (error) => {
+      if (error instanceof ApiClientError) {
+        setErrorMessage(error.message)
+        return
+      }
+      setErrorMessage('Failed to delete page.')
+    },
+  })
+
+  const createBlockMutation = useMutation({
+    mutationFn: ({
+      pageId,
+      payload,
+    }: {
+      pageId: string
+      payload: Parameters<typeof createBlock>[1]
+    }) => createBlock(pageId, payload),
+    onSuccess: async (createdBlock) => {
+      await queryClient.invalidateQueries({ queryKey: ['blocks', createdBlock.page_id] })
+      await queryClient.invalidateQueries({ queryKey: ['page', createdBlock.page_id] })
+      setErrorMessage(null)
+    },
+    onError: (error) => {
+      if (error instanceof ApiClientError) {
+        setErrorMessage(error.message)
+        return
+      }
+      setErrorMessage('Failed to create block.')
+    },
+  })
+
+  const updateBlockMutation = useMutation({
+    mutationFn: ({
+      blockId,
+      payload,
+    }: {
+      blockId: string
+      payload: Parameters<typeof updateBlock>[1]
+    }) => updateBlock(blockId, payload),
+    onSuccess: async (updatedBlock) => {
+      await queryClient.invalidateQueries({ queryKey: ['blocks', updatedBlock.page_id] })
+      setErrorMessage(null)
+    },
+    onError: async (error) => {
+      if (error instanceof ApiClientError && error.code === 'CONCURRENCY_CONFLICT') {
+        setErrorMessage('This block changed elsewhere. Latest block data has been reloaded.')
+      } else {
+        setErrorMessage('Failed to update block.')
+      }
+      await queryClient.invalidateQueries({ queryKey: ['blocks', selectedPageId] })
+    },
+  })
+
+  const deleteBlockMutation = useMutation({
+    mutationFn: deleteBlock,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['blocks', selectedPageId] })
+      setErrorMessage(null)
+    },
+    onError: (error) => {
+      if (error instanceof ApiClientError) {
+        setErrorMessage(error.message)
+        return
+      }
+      setErrorMessage('Failed to delete block.')
+    },
+  })
+
+  useEffect(() => {
+    if (!workspaceId) {
+      return
+    }
+
+    if (pageList.length === 0) {
+      setSelectedPageId(null)
+      return
+    }
+
+    const selectedStillExists = pageList.some((page) => page.id === selectedPageId)
+    if (!selectedStillExists) {
+      setSelectedPageId(pageList[0].id)
+    }
+  }, [pageList, selectedPageId, setSelectedPageId, workspaceId])
+
+  const selectedPage = pageQuery.data ?? null
+  const selectedBlocks = useMemo(() => blocksQuery.data?.items ?? [], [blocksQuery.data?.items])
+  const pageLookup = useMemo(() => new Map(pageList.map((page) => [page.id, page])), [pageList])
+
+  const createRootPage = async () => {
+    if (!workspaceId || !pageDraftTitle.trim()) {
+      return
+    }
+
+    const nextPosition = pageList.filter((page) => page.parent_page_id === pageDraftParentId).length
+    await createPageMutation.mutateAsync({
+      workspaceId,
+      title: pageDraftTitle.trim(),
+      parentId: pageDraftParentId,
+      position: nextPosition,
+    })
+  }
+
+  const createChildPage = async (parentId: string | null) => {
+    if (!workspaceId) {
+      return
+    }
+    const baseTitle = parentId ? 'New child page' : 'New page'
+    const siblingCount = pageList.filter((page) => page.parent_page_id === parentId).length
+    await createPageMutation.mutateAsync({
+      workspaceId,
+      title: baseTitle,
+      parentId,
+      position: siblingCount,
+    })
+  }
+
+  const removePage = async (page: Page) => {
+    await deletePageMutation.mutateAsync(page.id)
+  }
+
+  const updateCurrentPage = async (
+    pageId: string,
+    payload: { version: number; title?: string; parent_page_id?: string | null; position?: number },
+  ) => {
+    await updatePageMutation.mutateAsync({ pageId, payload })
+  }
+
+  const createBlockForPage = async (payload: {
+    type: string
+    position: number
+    content: Record<string, unknown>
+  }) => {
+    if (!selectedPageId) {
+      return
+    }
+    await createBlockMutation.mutateAsync({ pageId: selectedPageId, payload })
+  }
+
+  const updateExistingBlock = async (
+    blockId: string,
+    payload: {
+      version: number
+      type?: string
+      position?: number
+      content?: Record<string, unknown>
+    },
+  ) => {
+    await updateBlockMutation.mutateAsync({ blockId, payload })
+  }
+
+  const removeBlock = async (block: Block) => {
+    await deleteBlockMutation.mutateAsync(block.id)
+  }
+
+  const requestDeletePage = (page: Page) => setDeleteTarget({ kind: 'page', page })
+  const requestDeleteBlock = (block: Block) => setDeleteTarget({ kind: 'block', block })
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    if (deleteTarget.kind === 'page' && deleteTarget.page) await removePage(deleteTarget.page)
+    if (deleteTarget.kind === 'block' && deleteTarget.block) await removeBlock(deleteTarget.block)
+    setDeleteTarget(null)
+  }
+
+  const moveCurrentPage = async (parentPageId: string | null, position: number) => {
+    if (!selectedPage) return
+    await updateCurrentPage(selectedPage.id, { version: selectedPage.version, parent_page_id: parentPageId, position })
+    setMoveDialogOpen(false)
+  }
+
+  if (workspaceQuery.isLoading) {
+    return <div className="loading-screen">Loading workspace...</div>
+  }
+
+  if (workspaceQuery.isError) {
+    return (
+      <div className="loading-screen">
+        <InlineNotice tone="error" message="Could not load workspaces. Check backend connection." />
+      </div>
+    )
+  }
+
+  if (!workspace) {
+    return (
+      <div className="empty-workspace-screen">
+        <article className="empty-card">
+          <p className="eyebrow">Workspace setup</p>
+          <h1>Create your first workspace</h1>
+          <p className="lead">Start by creating a local workspace. Your pages and blocks persist via the REST API.</p>
+          <div className="create-workspace-row">
+            <input
+              aria-label="Workspace name"
+              placeholder="Workspace name"
+              value={workspaceDraft}
+              onChange={(event) => setWorkspaceDraft(event.target.value)}
+            />
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={() => createWorkspaceMutation.mutate(workspaceDraft.trim())}
+              disabled={!workspaceDraft.trim() || createWorkspaceMutation.isPending}
+            >
+              {createWorkspaceMutation.isPending ? 'Creating...' : 'Create workspace'}
+            </button>
+          </div>
+        </article>
+      </div>
+    )
+  }
 
   return (
     <div className="app-shell">
-      <aside className="side-panel" aria-label="Navigation panel">
-        <p className="panel-label">GoldenSon</p>
-        <h2>Workspace Foundation</h2>
-        <p className="panel-copy">Frontend scaffold with backend connectivity check.</p>
+      <aside className={`side-panel ${sidebarOpen ? 'is-open' : 'is-collapsed'}`} aria-label="Navigation panel">
+        <div className="sidebar-header">
+          <div>
+            <p className="panel-label">Workspace</p>
+            <h2>{workspace.name}</h2>
+          </div>
+          <button
+            type="button"
+            className="tree-icon"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+          >
+            {sidebarOpen ? '⟨' : '⟩'}
+          </button>
+        </div>
+
+        {sidebarOpen && (
+          <>
+            <NewPageForm
+              pages={pageList}
+              title={pageDraftTitle}
+              parentId={pageDraftParentId}
+              pending={createPageMutation.isPending}
+              onTitleChange={setPageDraftTitle}
+              onParentChange={setPageDraftParentId}
+              onSubmit={() => void createRootPage()}
+            />
+
+            <PageTree
+              pages={pageList}
+              selectedPageId={selectedPageId}
+              expandedPages={expandedPages}
+              onToggleExpand={togglePageExpanded}
+              onSelectPage={setSelectedPageId}
+              onCreateChild={createChildPage}
+              onDeletePage={requestDeletePage}
+            />
+          </>
+        )}
       </aside>
 
       <main className="main-panel">
         <header className="topbar">
           <p className="eyebrow">Local-first AI knowledge workspace</p>
-          <h1>Frontend is running</h1>
-          <p className="lead">Use the health card below to verify frontend to backend connectivity.</p>
+          <h1>Workspace editor</h1>
+          <p className="lead">
+            Navigate pages, create nested content, edit blocks, and persist every change through the API.
+          </p>
         </header>
 
-        <section className="card-grid">
-          <article className="status-card">
-            <div className="card-head">
-              <h3>API Health</h3>
-              <span className={`status-pill ${healthQuery.isError ? 'is-error' : 'is-ok'}`}>
-                {healthQuery.isError ? 'unreachable' : 'ready'}
-              </span>
-            </div>
+        {errorMessage && <InlineNotice tone="error" message={errorMessage} />}
 
-            <p className="card-copy">
-              Endpoint: <strong>/api/health</strong>
-            </p>
-            <p className="card-copy">
-              Response:{' '}
-              <strong>{healthQuery.data?.status ?? (healthQuery.isError ? 'error' : 'pending')}</strong>
-            </p>
-            <p className="card-copy">Last checked: {lastChecked}</p>
-
-            <div className="card-actions">
-              <button
-                className="action action-primary"
-                type="button"
-                onClick={() => healthQuery.refetch()}
-                disabled={healthQuery.isFetching}
-              >
-                {healthQuery.isFetching ? 'Checking...' : 'Check backend health'}
-              </button>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={autoRefresh}
-                  onChange={(event) => setAutoRefresh(event.target.checked)}
-                />
-                Auto refresh (15s)
-              </label>
-            </div>
-
-            {healthQuery.isError && (
-              <p className="error-note">Unable to reach API. Confirm the backend is running on port 8000.</p>
-            )}
+        {!selectedPageId && (
+          <article className="empty-card">
+            <h3>No page selected</h3>
+            <p className="lead">Choose a page from the sidebar or create a new page to begin editing.</p>
           </article>
+        )}
 
-          <article className="info-card">
-            <h3>Current scope</h3>
-            <ul>
-              <li>Repository and tooling foundation</li>
-              <li>Backend health endpoint</li>
-              <li>Frontend connectivity verification</li>
-            </ul>
-          </article>
-        </section>
+        {selectedPageId && pageQuery.isLoading && <p className="loading-copy">Loading selected page...</p>}
+
+        {selectedPageId && pageQuery.isError && (
+          <InlineNotice tone="error" message="Could not load page details. Try selecting the page again." />
+        )}
+
+        {selectedPage && (
+          <PageEditor
+            key={selectedPage.id}
+            page={selectedPage}
+            blocks={selectedBlocks}
+            busy={updatePageMutation.isPending}
+            errorMessage={errorMessage}
+            onUpdatePage={updateCurrentPage}
+            onCreateBlock={createBlockForPage}
+            onUpdateBlock={updateExistingBlock}
+            onDeleteBlock={requestDeleteBlock}
+            onRequestMove={() => setMoveDialogOpen(true)}
+            onRequestDelete={() => requestDeletePage(selectedPage)}
+          />
+        )}
+
+        <footer className="bottom-meta">
+          <span>Pages: {pageList.length}</span>
+          <span>Selected: {selectedPageId ? pageLookup.get(selectedPageId)?.title ?? 'Unknown' : 'None'}</span>
+        </footer>
       </main>
+      {selectedPage && <MovePageDialog key={`${selectedPage.id}-${moveDialogOpen}`} page={selectedPage} pages={pageList} open={moveDialogOpen} busy={updatePageMutation.isPending} onCancel={() => setMoveDialogOpen(false)} onMove={moveCurrentPage} />}
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title={deleteTarget?.kind === 'page' ? 'Delete page?' : 'Delete block?'}
+        message={deleteTarget?.kind === 'page' && deleteTarget.page ? `This will permanently delete “${deleteTarget.page.title}” and all of its child pages and blocks.` : 'This will permanently remove this piece of content.'}
+        confirmLabel={deleteTarget?.kind === 'page' ? 'Delete page' : 'Delete block'}
+        busy={deletePageMutation.isPending || deleteBlockMutation.isPending}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => void confirmDelete()}
+      />
     </div>
   )
 }

@@ -1,13 +1,13 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from goldenson_api.db.models.page import Page
+from goldenson_api.db.repositories.block_repository import BlockRepository
 from goldenson_api.db.repositories.page_repository import PageRepository
 from goldenson_api.db.repositories.workspace_repository import WorkspaceRepository
 from goldenson_api.schemas.page import PageCreate, PageUpdate, PageUpdateTitle
 from goldenson_api.services.errors import (
     BadRequestError,
     ConcurrencyConflictError,
-    ConflictError,
     NotFoundError,
 )
 
@@ -15,6 +15,7 @@ from goldenson_api.services.errors import (
 class PageService:
     def __init__(self, session: AsyncSession) -> None:
         self._repository = PageRepository(session)
+        self._block_repository = BlockRepository(session)
         self._workspace_repository = WorkspaceRepository(session)
 
     async def create_page(self, payload: PageCreate) -> Page:
@@ -68,9 +69,7 @@ class PageService:
 
         next_parent_id = page.parent_page_id
         if set_parent:
-            next_parent_id = (
-                None if payload.parent_page_id is None else str(payload.parent_page_id)
-            )
+            next_parent_id = None if payload.parent_page_id is None else str(payload.parent_page_id)
             if next_parent_id == page.id:
                 raise BadRequestError("a page cannot be its own parent")
             if next_parent_id is not None:
@@ -99,11 +98,19 @@ class PageService:
         if page is None:
             raise NotFoundError("page not found")
 
-        if await self._repository.has_children(page_id):
-            raise ConflictError("page has child pages and cannot be deleted")
+        pages = await self._repository.list_for_workspace(page.workspace_id)
+        descendants = {page_id}
+        changed = True
+        while changed:
+            changed = False
+            for candidate in pages:
+                if candidate.id not in descendants and candidate.parent_page_id in descendants:
+                    descendants.add(candidate.id)
+                    changed = True
 
-        deleted = await self._repository.delete_by_id(page_id)
-        if not deleted:
+        await self._block_repository.delete_for_pages(list(descendants))
+        deleted = await self._repository.delete_subtree(list(descendants))
+        if deleted != len(descendants):
             raise NotFoundError("page not found")
 
     async def get_by_title_and_parent(
