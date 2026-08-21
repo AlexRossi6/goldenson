@@ -8,6 +8,10 @@ dependencies = [
   "fastapi>=0.116.0,<1.0.0",
   "uvicorn[standard]>=0.35.0,<1.0.0",
   "pydantic-settings>=2.10.0,<3.0.0",
+  "sqlalchemy>=2.0.52",
+  "aiosqlite>=0.22.1",
+  "alembic>=1.19.1",
+  "greenlet>=3.5.5",
 ]
 
 [dependency-groups]

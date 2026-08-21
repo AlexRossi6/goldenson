@@ -57,6 +57,14 @@ uv run mypy .
 uv run pytest
 ```
 
+## Migrations and seed data
+
+```bash
+cd apps/api
+uv run alembic upgrade head
+uv run python -m goldenson_api.scripts.seed
+```
+
 ## Frontend checks
 
 ```bash
