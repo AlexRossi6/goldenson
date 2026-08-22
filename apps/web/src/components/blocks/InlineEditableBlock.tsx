@@ -68,7 +68,9 @@ function focusAt(element: HTMLElement | null, offset: number): void {
 }
 
 export function InlineEditableBlock({ block, onUpdateBlock, onDeleteBlock }: InlineEditableBlockProps) {
-  const initialText = typeof block.content.text === 'string' ? block.content.text : ''
+  const initialText = block.type === 'code'
+    ? typeof block.content.code === 'string' ? block.content.code : ''
+    : typeof block.content.text === 'string' ? block.content.text : ''
   const [text, setText] = useState(initialText)
   const [todoContent, setTodoContent] = useState<TodoContent>(() => normalizeTodoContent(block.content))
   const [busy, setBusy] = useState(false)
@@ -159,13 +161,10 @@ export function InlineEditableBlock({ block, onUpdateBlock, onDeleteBlock }: Inl
     }
   }
 
-  const label = block.type === 'todo' ? 'Task' : block.type === 'heading' ? 'Heading' : 'Paragraph'
-
   return (
-    <li className="block-card">
-      <div className="block-meta">
-        <span>{label}</span>
-        <button type="button" className="text-button danger-link" onClick={() => void onDeleteBlock(block)} disabled={busy}>Delete</button>
+    <li className={`block-card block-${block.type}`}>
+      <div className="block-context-actions">
+        <button type="button" className="block-delete text-button danger-link" aria-label={`Delete ${block.type} block`} onClick={() => void onDeleteBlock(block)} disabled={busy}>Delete</button>
       </div>
       <div className="block-content" aria-busy={busy}>
         {block.type === 'todo' ? (
@@ -222,6 +221,24 @@ export function InlineEditableBlock({ block, onUpdateBlock, onDeleteBlock }: Inl
               </div>
             ))}
           </div>
+        ) : block.type === 'code' ? (
+          <pre className="inline-code-shell">
+            <code
+              className="inline-code"
+              contentEditable={!busy}
+              suppressContentEditableWarning
+              role="textbox"
+              aria-label="Code content"
+              aria-multiline="true"
+              data-placeholder="Write code..."
+              onInput={(event) => {
+                textRef.current = editableText(event.currentTarget)
+              }}
+              onBlur={() => persist({ ...block.content, code: textRef.current })}
+            >
+              {text}
+            </code>
+          </pre>
         ) : (
           <div className="inline-document" aria-label={block.type === 'paragraph' ? 'Paragraph content' : 'Heading content'}>
             {text.split('\n').map((line, index) => {

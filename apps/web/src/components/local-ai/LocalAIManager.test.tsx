@@ -91,16 +91,16 @@ describe('LocalAIManager', () => {
     expect(screen.queryByRole('dialog', { name: 'Local AI' })).not.toBeInTheDocument()
   })
 
-  it('prevents a model install when Ollama is unavailable', async () => {
+  it('prevents a model install until Local AI is set up', async () => {
     apiMocks.getLocalAIStatus.mockResolvedValue(unavailableStatus)
 
     render(<LocalAIManager onReadyChange={vi.fn()} />)
 
-    expect(await screen.findByText('Ollama is required')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Requires Ollama' })).toBeDisabled()
+    expect(await screen.findByText('Set up Local AI')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Set up Local AI first' })).toBeDisabled()
   })
 
-  it('confirms Ollama installation and shows streamed download progress', async () => {
+  it('confirms Local AI installation and shows streamed download progress', async () => {
     const user = userEvent.setup()
     let finishInstallation: (() => void) | undefined
     apiMocks.getLocalAIStatus
@@ -121,12 +121,12 @@ describe('LocalAIManager', () => {
     })
 
     render(<LocalAIManager onReadyChange={vi.fn()} />)
-    await user.click(await screen.findByRole('button', { name: 'Install Ollama' }))
-    const confirmation = screen.getByRole('alertdialog', { name: 'Install Ollama' })
-    expect(within(confirmation).getByText(/official signed Ollama application/i)).toBeInTheDocument()
-    await user.click(within(confirmation).getByRole('button', { name: 'Install Ollama' }))
+    await user.click(await screen.findByRole('button', { name: 'Install Local AI' }))
+    const confirmation = screen.getByRole('alertdialog', { name: 'Install Local AI' })
+    expect(within(confirmation).getByText(/official signed Ollama engine/i)).toBeInTheDocument()
+    await user.click(within(confirmation).getByRole('button', { name: 'Install Local AI' }))
 
-    expect(await screen.findByRole('progressbar', { name: 'Installing Ollama' })).toHaveAttribute('value', '0.5')
+    expect(await screen.findByRole('progressbar', { name: 'Installing Local AI' })).toHaveAttribute('value', '0.5')
     expect(screen.getByText('Downloading Ollama...')).toBeInTheDocument()
     expect(screen.getByText(/50%/)).toBeInTheDocument()
     finishInstallation?.()

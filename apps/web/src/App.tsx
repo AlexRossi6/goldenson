@@ -5,6 +5,7 @@ import { createBlock, deleteBlock, listBlocks, updateBlock } from './api/blocks'
 import { deleteFile, listFiles, listPageFiles, uploadFile } from './api/files'
 import { createPage, deletePage, getPage, listPages, updatePage } from './api/pages'
 import { createWorkspace, listWorkspaces } from './api/workspaces'
+import type { AgentWorkspaceChange } from './api/agent'
 import { AssistantPanel } from './components/assistant/AssistantPanel'
 import { PageEditor } from './components/pages/PageEditor'
 import { MovePageDialog } from './components/pages/MovePageDialog'
@@ -244,8 +245,6 @@ function App() {
 
   const selectedPage = pageQuery.data ?? null
   const selectedBlocks = useMemo(() => blocksQuery.data?.items ?? [], [blocksQuery.data?.items])
-  const pageLookup = useMemo(() => new Map(pageList.map((page) => [page.id, page])), [pageList])
-
   const createRootPage = async () => {
     if (!workspaceId || !pageDraftTitle.trim()) {
       return
@@ -333,6 +332,43 @@ function App() {
     setMoveDialogOpen(false)
   }
 
+  const refreshAfterAgentMutation = async (change: AgentWorkspaceChange) => {
+    const resultId = typeof change.result.id === 'string' ? change.result.id : null
+    const resultPageId = typeof change.result.page_id === 'string' ? change.result.page_id : null
+    const pageTools = new Set(['create_page', 'update_page', 'move_page', 'delete_page'])
+
+    if (pageTools.has(change.tool_name)) {
+      await queryClient.invalidateQueries({ queryKey: ['pages', workspaceId] })
+      const affectedPageId = change.tool_name === 'delete_page' ? resultPageId : resultId
+      if (affectedPageId) {
+        if (change.tool_name === 'delete_page' && selectedPageId === affectedPageId) {
+          setSelectedPageId(null)
+        } else {
+          await queryClient.invalidateQueries({ queryKey: ['page', affectedPageId] })
+        }
+      }
+    }
+
+    if (change.tool_name === 'create_task' && resultPageId) {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['blocks', resultPageId] }),
+        queryClient.invalidateQueries({ queryKey: ['page', resultPageId] }),
+      ])
+    }
+
+    if (change.tool_name === 'create_file') {
+      const invalidations = [
+        queryClient.invalidateQueries({ queryKey: ['files', workspaceId] }),
+      ]
+      if (resultPageId) {
+        invalidations.push(
+          queryClient.invalidateQueries({ queryKey: ['page-files', resultPageId] }),
+        )
+      }
+      await Promise.all(invalidations)
+    }
+  }
+
   if (workspaceQuery.isLoading) {
     return <div className="loading-screen">Loading workspace...</div>
   }
@@ -351,7 +387,7 @@ function App() {
         <article className="empty-card">
           <p className="eyebrow">Workspace setup</p>
           <h1>Create your first workspace</h1>
-          <p className="lead">Start by creating a local workspace. Your pages and blocks persist via the REST API.</p>
+          <p className="lead">Start with a private workspace. Your pages and notes are saved automatically on this computer.</p>
           <div className="create-workspace-row">
             <input
               aria-label="Workspace name"
@@ -426,10 +462,10 @@ function App() {
 
       <main className="main-panel">
         <header className="topbar">
-          <p className="eyebrow">local AI knowledge workspace</p>
-          <h1>Workspace editor</h1>
+          <p className="eyebrow">Private knowledge workspace</p>
+          <h1>Your workspace</h1>
           <p className="lead">
-            Navigate pages, create nested content, edit blocks, and persist every change through the API.
+            Capture ideas, organize pages, and explore your notes with your local assistant.
           </p>
         </header>
 
@@ -470,12 +506,12 @@ function App() {
           />
         )}
 
-        <footer className="bottom-meta">
-          <span>Pages: {pageList.length}</span>
-          <span>Selected: {selectedPageId ? pageLookup.get(selectedPageId)?.title ?? 'Unknown' : 'None'}</span>
-        </footer>
       </main>
-      <AssistantPanel workspaceId={workspace.id} onSelectPage={setSelectedPageId} />
+      <AssistantPanel
+        workspaceId={workspace.id}
+        onSelectPage={setSelectedPageId}
+        onWorkspaceChanged={(change) => void refreshAfterAgentMutation(change)}
+      />
       {selectedPage && <MovePageDialog key={`${selectedPage.id}-${moveDialogOpen}`} page={selectedPage} pages={pageList} open={moveDialogOpen} busy={updatePageMutation.isPending} onCancel={() => setMoveDialogOpen(false)} onMove={moveCurrentPage} />}
       <ConfirmDialog
         open={Boolean(deleteTarget)}

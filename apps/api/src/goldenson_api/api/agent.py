@@ -10,10 +10,10 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from goldenson_api.agent.schemas import AgentRunRequest, ApprovalDecision
-from goldenson_api.agent.service import AgentService, ApprovalService, cancel_agent_run
+from goldenson_api.agent.service import AgentService, cancel_persisted_agent_run
 from goldenson_api.api.dependencies import get_db_session
 from goldenson_api.api.local_ai import Runtime
-from goldenson_api.core.config import Settings, get_settings
+from goldenson_api.core.config import get_settings
 from goldenson_api.inference.provider import LLMProvider, OpenAICompatibleLocalProvider
 from goldenson_api.local_ai.service import LocalAIService
 from goldenson_api.services.errors import NotFoundError
@@ -43,6 +43,17 @@ def _sse(event: dict[str, object]) -> str:
     return f"event: {event_type}\ndata: {json.dumps(event, separators=(',', ':'))}\n\n"
 
 
+def _agent_service(session: AsyncSession, provider: LLMProvider) -> AgentService:
+    settings = get_settings()
+    return AgentService(
+        session,
+        provider,
+        max_tool_calls=settings.agent_max_tool_calls,
+        max_run_seconds=settings.agent_max_run_seconds,
+        tool_timeout_seconds=settings.agent_tool_timeout_seconds,
+    )
+
+
 @router.post(
     "/workspaces/{workspace_id}/agent/runs",
     summary="Run the local workspace agent",
@@ -53,14 +64,7 @@ async def run_agent(
     session: DbSession,
     provider: LLM,
 ) -> StreamingResponse:
-    settings: Settings = get_settings()
-    service = AgentService(
-        session,
-        provider,
-        max_tool_calls=settings.agent_max_tool_calls,
-        max_run_seconds=settings.agent_max_run_seconds,
-        tool_timeout_seconds=settings.agent_tool_timeout_seconds,
-    )
+    service = _agent_service(session, provider)
 
     async def events() -> AsyncIterator[str]:
         async for event in service.run(str(workspace_id), payload.message):
@@ -82,15 +86,46 @@ async def decide_agent_tool_call(
     tool_call_id: UUID,
     payload: ApprovalDecision,
     session: DbSession,
-) -> dict[str, object]:
-    settings = get_settings()
-    return await ApprovalService(session, settings.agent_tool_timeout_seconds).decide(
-        str(workspace_id), str(tool_call_id), payload.approved
+    provider: LLM,
+) -> StreamingResponse:
+    service = _agent_service(session, provider)
+
+    async def events() -> AsyncIterator[str]:
+        async for event in service.decide(str(workspace_id), str(tool_call_id), payload.approved):
+            yield _sse(event)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/agent/runs/{run_id}/events",
+    summary="Reconnect to a persisted agent run",
+)
+async def reconnect_agent_run(
+    workspace_id: UUID,
+    run_id: UUID,
+    session: DbSession,
+    provider: LLM,
+) -> StreamingResponse:
+    service = _agent_service(session, provider)
+
+    async def events() -> AsyncIterator[str]:
+        async for event in service.reconnect(str(workspace_id), str(run_id)):
+            yield _sse(event)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
 @router.post("/agent/runs/{run_id}/cancel", summary="Cancel a running agent request")
-async def cancel_run(run_id: UUID) -> dict[str, object]:
-    if not cancel_agent_run(str(run_id)):
+async def cancel_run(run_id: UUID, session: DbSession) -> dict[str, object]:
+    if not await cancel_persisted_agent_run(session, str(run_id)):
         raise NotFoundError("running agent request not found")
     return {"status": "cancelling", "run_id": str(run_id)}

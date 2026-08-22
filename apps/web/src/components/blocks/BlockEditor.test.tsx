@@ -62,10 +62,26 @@ describe('BlockEditor', () => {
 
     expect(screen.getByRole('textbox', { name: 'Heading content' })).toHaveTextContent('Hello')
     expect(screen.getByRole('textbox', { name: 'Paragraph line 1' })).toHaveTextContent('Hello')
-    expect(screen.getByText('Heading')).toBeInTheDocument()
-    expect(screen.getByText('Paragraph')).toBeInTheDocument()
+    expect(screen.queryByText('Heading')).not.toBeInTheDocument()
+    expect(screen.queryByText('Paragraph')).not.toBeInTheDocument()
     expect(screen.getByText('Review notes')).toBeInTheDocument()
     expect(screen.getByText('echo hello')).toBeInTheDocument()
+  })
+
+  it('keeps block controls contextual while preserving accessible actions', () => {
+    render(
+      <BlockEditor
+        blocks={[makeBlock({ id: 'paragraph', page_id: 'p1', type: 'paragraph' })]}
+        onCreateBlock={vi.fn().mockResolvedValue(undefined)}
+        onUpdateBlock={vi.fn().mockResolvedValue(undefined)}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    expect(screen.queryByText('Paragraph')).not.toBeInTheDocument()
+    const deleteAction = screen.getByRole('button', { name: 'Delete paragraph block' })
+    expect(deleteAction).toHaveClass('block-delete')
+    expect(deleteAction.parentElement).toHaveClass('block-context-actions')
   })
 
   it('edits paragraph and heading text directly in rendered content and persists on blur', async () => {
@@ -267,7 +283,7 @@ describe('BlockEditor', () => {
     })
   })
 
-  it('edits code and retains the editing state when saving conflicts', async () => {
+  it('edits code directly on its rendered surface and retains it when saving conflicts', async () => {
     const user = userEvent.setup()
     const onUpdateBlock = vi.fn().mockRejectedValue(new Error('CONCURRENCY_CONFLICT'))
     render(
@@ -279,8 +295,10 @@ describe('BlockEditor', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Edit code' }))
     const codeInput = screen.getByRole('textbox', { name: 'Code content' })
+    expect(codeInput.tagName).toBe('CODE')
+    expect(codeInput).toHaveAttribute('contenteditable', 'true')
+    expect(screen.queryByRole('button', { name: 'Edit code' })).not.toBeInTheDocument()
     await user.clear(codeInput)
     await user.type(codeInput, 'print(2)')
     await user.tab()

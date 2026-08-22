@@ -7,15 +7,17 @@ import {
   type AgentEvent,
   type AgentProposal,
   type AgentSource,
+  type AgentWorkspaceChange,
 } from '../../api/agent'
 import { LocalAIManager } from '../local-ai/LocalAIManager'
 
 type AssistantPanelProps = {
   workspaceId: string
   onSelectPage: (pageId: string) => void
+  onWorkspaceChanged?: (change: AgentWorkspaceChange) => void
 }
 
-export function AssistantPanel({ workspaceId, onSelectPage }: AssistantPanelProps) {
+export function AssistantPanel({ workspaceId, onSelectPage, onWorkspaceChanged }: AssistantPanelProps) {
   const [question, setQuestion] = useState('')
   const [answer, setAnswer] = useState('')
   const [activity, setActivity] = useState<string[]>([])
@@ -23,18 +25,39 @@ export function AssistantPanel({ workspaceId, onSelectPage }: AssistantPanelProp
   const [proposal, setProposal] = useState<AgentProposal | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
+  const [progressMessage, setProgressMessage] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [localAIReady, setLocalAIReady] = useState(false)
   const controllerRef = useRef<AbortController | null>(null)
 
   const handleEvent = (event: AgentEvent) => {
     if (event.type === 'run') setRunId(event.run_id)
-    if (event.type === 'activity') setActivity((current) => [...current, event.message])
-    if (event.type === 'sources') setSources(event.sources)
-    if (event.type === 'text') setAnswer((current) => current + event.content)
-    if (event.type === 'proposal') setProposal(event.proposal)
-    if (event.type === 'error') setError(event.message)
-    if (event.type === 'done') setRunning(false)
+    if (event.type === 'activity') {
+      setActivity((current) => [...current, event.message])
+      setProgressMessage(event.message.replace(/\.{3}$/, ''))
+    }
+    if (event.type === 'sources') {
+      setSources(event.sources)
+      setProgressMessage('Thinking')
+    }
+    if (event.type === 'text') {
+      setProgressMessage(null)
+      setAnswer((current) => current + event.content)
+    }
+    if (event.type === 'proposal') {
+      setProgressMessage(null)
+      setProposal(event.proposal)
+    }
+    if (event.type === 'workspace_changed') onWorkspaceChanged?.(event)
+    if (event.type === 'error') {
+      setProgressMessage(null)
+      setError(event.message)
+    }
+    if (event.type === 'done') {
+      setProgressMessage(null)
+      setRunning(false)
+    }
   }
 
   const submit = async (event: FormEvent) => {
@@ -51,12 +74,13 @@ export function AssistantPanel({ workspaceId, onSelectPage }: AssistantPanelProp
     setError(null)
     setRunId(null)
     setRunning(true)
+    setProgressMessage('Preparing answer')
 
     try {
       await streamAgentRun(workspaceId, message, handleEvent, controller.signal)
     } catch (streamError) {
       if (!(streamError instanceof DOMException && streamError.name === 'AbortError')) {
-        setError(streamError instanceof Error ? streamError.message : 'The local agent failed.')
+        setError(streamError instanceof Error ? streamError.message : 'The assistant could not complete this request.')
       }
     } finally {
       setRunning(false)
@@ -68,33 +92,62 @@ export function AssistantPanel({ workspaceId, onSelectPage }: AssistantPanelProp
     controllerRef.current?.abort()
     if (runId) void cancelAgentRun(runId).catch(() => undefined)
     setRunning(false)
+    setProgressMessage(null)
     setActivity((current) => [...current, 'Cancelled.'])
   }
 
   const decide = async (approved: boolean) => {
     if (!proposal) return
+    const decidedProposal = proposal
+    const controller = new AbortController()
+    controllerRef.current = controller
     setError(null)
+    setProposal(null)
+    setRunning(true)
+    setProgressMessage(approved ? 'Approved, continuing' : 'Rejected, continuing')
     try {
-      const result = await decideAgentProposal(workspaceId, proposal.tool_call_id, approved)
-      setActivity((current) => [
-        ...current,
-        result.status === 'completed' ? 'Change applied.' : 'Change rejected.',
-      ])
-      setProposal(null)
+      await decideAgentProposal(
+        workspaceId,
+        decidedProposal.tool_call_id,
+        approved,
+        handleEvent,
+        controller.signal,
+      )
     } catch (decisionError) {
-      setError(decisionError instanceof Error ? decisionError.message : 'Could not record decision.')
+      if (!(decisionError instanceof DOMException && decisionError.name === 'AbortError')) {
+        setProposal(decidedProposal)
+        setError(decisionError instanceof Error ? decisionError.message : 'Could not record decision.')
+      }
+    } finally {
+      setRunning(false)
+      setProgressMessage(null)
+      controllerRef.current = null
     }
   }
 
   return (
-    <aside className="assistant-panel" aria-label="Workspace assistant">
+    <aside className={`assistant-panel${expanded ? '' : ' is-collapsed'}`} aria-label="Workspace assistant">
       <header className="assistant-header">
-        <p className="panel-label">Local agent</p>
-        <h2>Assistant</h2>
+        <div>
+          <p className="panel-label">Private workspace AI</p>
+          <h2>Assistant</h2>
+        </div>
+        <button
+          type="button"
+          className="assistant-toggle tree-icon"
+          aria-expanded={expanded}
+          aria-label={expanded ? 'Collapse assistant' : 'Expand assistant'}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? '⌄' : '⌃'}
+        </button>
       </header>
       <LocalAIManager onReadyChange={setLocalAIReady} />
 
       <div className="assistant-transcript" aria-live="polite">
+        {running && progressMessage && (
+          <p className="assistant-progress" role="status">{progressMessage}</p>
+        )}
         {activity.length > 0 && (
           <ol className="assistant-activity" aria-label="Agent activity">
             {activity.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}

@@ -9,15 +9,16 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from goldenson_api.agent.service import (
     AgentService,
-    ApprovalService,
     cancel_agent_run,
+    cancel_persisted_agent_run,
 )
 from goldenson_api.agent.tools import AgentToolExecutor, validate_tool_arguments
 from goldenson_api.api.agent import get_llm_provider
+from goldenson_api.db.repositories.agent_audit_repository import AgentAuditRepository
 from goldenson_api.inference.provider import (
     ChatMessage,
     LLMProviderTimeoutError,
@@ -30,7 +31,7 @@ from goldenson_api.schemas.block import BlockCreate
 from goldenson_api.schemas.page import PageCreate
 from goldenson_api.schemas.workspace import WorkspaceCreate
 from goldenson_api.services.block_service import BlockService
-from goldenson_api.services.errors import BadRequestError
+from goldenson_api.services.errors import BadRequestError, NotFoundError
 from goldenson_api.services.page_service import PageService
 from goldenson_api.services.workspace_service import WorkspaceService
 
@@ -39,13 +40,20 @@ class FakeProvider:
     def __init__(self, responses: list[LLMResponse | Exception]) -> None:
         self.responses = responses
         self.calls: list[Sequence[ChatMessage]] = []
+        self.tool_names: list[list[str]] = []
 
     async def complete(
         self,
         messages: Sequence[ChatMessage],
         tools: Sequence[dict[str, object]],
     ) -> LLMResponse:
-        self.calls.append(messages)
+        self.calls.append(list(messages))
+        names: list[str] = []
+        for tool in tools:
+            function = tool.get("function")
+            if isinstance(function, dict) and isinstance(function.get("name"), str):
+                names.append(function["name"])
+        self.tool_names.append(names)
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
@@ -269,35 +277,83 @@ async def test_write_requires_approval_then_executes(session: AsyncSession) -> N
     workspace_id, _ = await seed_workspace(session)
     provider = FakeProvider(
         [
-            LLMResponse(
-                tool_calls=[
-                    LLMToolCall(
-                        id="write-1",
-                        name="create_page",
-                        arguments={"title": "Agent Draft", "position": 1},
-                    )
-                ]
-            )
+            LLMResponse(content="Created Agent Draft and verified the change."),
         ]
     )
     service = AgentService(
         session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
     )
 
-    events = await collect_events(service, workspace_id, "Create an Agent Draft page")
+    events = await collect_events(service, workspace_id, "Create a page called Agent Draft")
     pages_before = await PageService(session).list_pages(workspace_id)
     proposal_event = next(event for event in events if event.get("type") == "proposal")
     proposal = proposal_event["proposal"]
     assert isinstance(proposal, dict)
     assert [page.title for page in pages_before] == ["Local AI"]
 
-    result = await ApprovalService(session, 2).decide(
-        workspace_id, str(proposal["tool_call_id"]), True
-    )
+    resumed = [
+        event async for event in service.decide(workspace_id, str(proposal["tool_call_id"]), True)
+    ]
     pages_after = await PageService(session).list_pages(workspace_id)
 
-    assert result["status"] == "completed"
+    assert any("Approved" in str(event.get("message")) for event in resumed)
+    assert any(
+        event.get("type") == "workspace_changed" and event.get("tool_name") == "create_page"
+        for event in resumed
+    )
+    assert "verified" in "".join(str(event.get("content", "")) for event in resumed)
+    assert resumed[-1] == {"type": "done", "status": "completed"}
     assert [page.title for page in pages_after] == ["Local AI", "Agent Draft"]
+    assert len(provider.calls) == 1
+    assert provider.calls[0][-1].role == "tool"
+
+
+@pytest.mark.asyncio
+async def test_simple_create_page_reaches_approval_without_irrelevant_retrieval(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace_id, _ = await seed_workspace(session)
+
+    async def unexpected_retrieval(
+        _service: WorkspaceRetrievalService,
+        _workspace_id: str,
+        _query: str,
+        _limit: int = 6,
+    ) -> object:
+        raise AssertionError("self-contained create_page should not scan workspace content")
+
+    monkeypatch.setattr(WorkspaceRetrievalService, "search", unexpected_retrieval)
+    lifecycle_logs: list[str] = []
+
+    def capture_lifecycle_log(message: str, *arguments: object) -> None:
+        lifecycle_logs.append(message % arguments)
+
+    monkeypatch.setattr("goldenson_api.agent.service.logger.debug", capture_lifecycle_log)
+    provider = FakeProvider([])
+
+    events = await collect_events(
+        AgentService(
+            session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
+        ),
+        workspace_id,
+        "Create a page called Test Agent",
+    )
+
+    proposal = next(event["proposal"] for event in events if event.get("type") == "proposal")
+    assert isinstance(proposal, dict)
+    assert proposal["tool_name"] == "create_page"
+    assert proposal["arguments"] == {
+        "title": "Test Agent",
+        "parent_page_id": None,
+        "position": 1,
+    }
+    assert provider.calls == []
+    lifecycle_log = "\n".join(lifecycle_logs)
+    assert "stage=retrieval" in lifecycle_log
+    assert "skipped=True" in lifecycle_log
+    assert "stage=provider" in lifecycle_log
+    assert "stage=approval_ready" in lifecycle_log
 
 
 @pytest.mark.asyncio
@@ -313,27 +369,33 @@ async def test_rejected_write_is_not_executed(session: AsyncSession) -> None:
                         arguments={"title": "Rejected Draft", "position": 1},
                     )
                 ]
-            )
+            ),
+            LLMResponse(content="I left the workspace unchanged."),
         ]
     )
-    events = await collect_events(
-        AgentService(
-            session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
-        ),
-        workspace_id,
-        "Create a page",
+    service = AgentService(
+        session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
     )
+    events = await collect_events(service, workspace_id, "Create a page")
     proposal = next(event["proposal"] for event in events if event.get("type") == "proposal")
     assert isinstance(proposal, dict)
 
-    result = await ApprovalService(session, 2).decide(
-        workspace_id, str(proposal["tool_call_id"]), False
-    )
+    resumed = [
+        event async for event in service.decide(workspace_id, str(proposal["tool_call_id"]), False)
+    ]
 
-    assert result["status"] == "rejected"
+    assert any("Rejected" in str(event.get("message")) for event in resumed)
+    assert "unchanged" in "".join(str(event.get("content", "")) for event in resumed)
+    assert resumed[-1] == {"type": "done", "status": "completed"}
     assert [page.title for page in await PageService(session).list_pages(workspace_id)] == [
         "Local AI"
     ]
+    assert '"status": "rejected"' in provider.calls[1][-1].content
+    with pytest.raises(BadRequestError, match="already decided differently"):
+        _ = [
+            event
+            async for event in service.decide(workspace_id, str(proposal["tool_call_id"]), True)
+        ]
 
 
 @pytest.mark.asyncio
@@ -349,23 +411,349 @@ async def test_delete_requires_approval_and_rejection_preserves_page(session: As
                         arguments={"page_id": page_id},
                     )
                 ]
-            )
+            ),
+            LLMResponse(content="The page was preserved."),
         ]
     )
-    events = await collect_events(
-        AgentService(
-            session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
-        ),
-        workspace_id,
-        "Delete Local AI",
+    service = AgentService(
+        session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
     )
+    events = await collect_events(service, workspace_id, "Delete Local AI")
     proposal = next(event["proposal"] for event in events if event.get("type") == "proposal")
     assert isinstance(proposal, dict)
     assert proposal["permission"] == "DESTRUCTIVE"
     assert await PageService(session).get_page(page_id) is not None
 
-    await ApprovalService(session, 2).decide(workspace_id, str(proposal["tool_call_id"]), False)
+    _ = [
+        event async for event in service.decide(workspace_id, str(proposal["tool_call_id"]), False)
+    ]
     assert await PageService(session).get_page(page_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_read_write_approve_read_verify_then_final_answer(
+    session: AsyncSession,
+) -> None:
+    workspace_id, page_id = await seed_workspace(session)
+    provider = FakeProvider(
+        [
+            LLMResponse(tool_calls=[LLMToolCall(id="read-1", name="list_pages", arguments={})]),
+            LLMResponse(
+                tool_calls=[
+                    LLMToolCall(
+                        id="write-1",
+                        name="create_task",
+                        arguments={
+                            "page_id": page_id,
+                            "text": "Verify local inference",
+                            "position": 1,
+                        },
+                    )
+                ]
+            ),
+            LLMResponse(
+                tool_calls=[
+                    LLMToolCall(id="verify-1", name="get_page", arguments={"page_id": page_id})
+                ]
+            ),
+            LLMResponse(content="The task was created and verified."),
+        ]
+    )
+    service = AgentService(
+        session, provider, max_tool_calls=5, max_run_seconds=10, tool_timeout_seconds=2
+    )
+
+    initial = await collect_events(service, workspace_id, "Create and verify a task")
+    proposal = next(event["proposal"] for event in initial if event.get("type") == "proposal")
+    assert isinstance(proposal, dict)
+    assert initial[-1] == {"type": "done", "status": "waiting_for_approval"}
+
+    resumed = [
+        event async for event in service.decide(workspace_id, str(proposal["tool_call_id"]), True)
+    ]
+
+    assert len(provider.calls) == 4
+    assert any(event.get("type") == "activity" and "get_page" in str(event) for event in resumed)
+    assert "created and verified" in "".join(str(event.get("content", "")) for event in resumed)
+    assert resumed[-1] == {"type": "done", "status": "completed"}
+    run_id = str(initial[0]["run_id"])
+    run = await AgentAuditRepository(session).get_run(run_id)
+    assert run is not None
+    assert run.tool_call_count == 3
+    assert run.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_approved_tool_database_failure_is_audited(session: AsyncSession) -> None:
+    workspace_id, page_id = await seed_workspace(session)
+    provider = FakeProvider(
+        [
+            LLMResponse(
+                tool_calls=[
+                    LLMToolCall(
+                        id="conflicting-task",
+                        name="create_task",
+                        arguments={
+                            "page_id": page_id,
+                            "text": "Conflicting task",
+                            "position": 0,
+                        },
+                    )
+                ]
+            )
+        ]
+    )
+    service = AgentService(
+        session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
+    )
+    initial = await collect_events(service, workspace_id, "Create a conflicting task")
+    proposal = next(event["proposal"] for event in initial if event.get("type") == "proposal")
+    assert isinstance(proposal, dict)
+
+    resumed = [
+        event async for event in service.decide(workspace_id, str(proposal["tool_call_id"]), True)
+    ]
+
+    assert resumed[-1] == {"type": "done", "status": "failed"}
+    tool_call = await AgentAuditRepository(session).get_tool_call(str(proposal["tool_call_id"]))
+    assert tool_call is not None
+    assert tool_call.error_summary == "tool execution failed"
+    run = await AgentAuditRepository(session).get_run(tool_call.run_id)
+    assert run is not None
+    assert run.status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_and_conflicting_approval_do_not_execute_twice(
+    session: AsyncSession,
+) -> None:
+    workspace_id, _ = await seed_workspace(session)
+    provider = FakeProvider(
+        [
+            LLMResponse(
+                tool_calls=[
+                    LLMToolCall(
+                        id="write-once",
+                        name="create_page",
+                        arguments={"title": "Only Once", "position": 1},
+                    )
+                ]
+            ),
+            LLMResponse(content="Done."),
+        ]
+    )
+    service = AgentService(
+        session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
+    )
+    initial = await collect_events(service, workspace_id, "Create one page")
+    proposal = next(event["proposal"] for event in initial if event.get("type") == "proposal")
+    assert isinstance(proposal, dict)
+    tool_call_id = str(proposal["tool_call_id"])
+
+    first = [event async for event in service.decide(workspace_id, tool_call_id, True)]
+    duplicate = [event async for event in service.decide(workspace_id, tool_call_id, True)]
+    reconnected = [
+        event async for event in service.reconnect(workspace_id, str(initial[0]["run_id"]))
+    ]
+
+    assert first[-1] == {"type": "done", "status": "completed"}
+    assert duplicate[-1] == {"type": "done", "status": "completed"}
+    assert reconnected[-1] == {"type": "done", "status": "completed"}
+    assert sum(event.get("type") == "workspace_changed" for event in first) == 1
+    assert not any(event.get("type") == "workspace_changed" for event in duplicate)
+    assert not any(event.get("type") == "workspace_changed" for event in reconnected)
+    assert [page.title for page in await PageService(session).list_pages(workspace_id)].count(
+        "Only Once"
+    ) == 1
+    with pytest.raises(BadRequestError, match="already decided differently"):
+        _ = [event async for event in service.decide(workspace_id, tool_call_id, False)]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_approval_claim_has_exactly_one_winner(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as setup_session:
+        workspace_id, _ = await seed_workspace(setup_session)
+        provider = FakeProvider(
+            [
+                LLMResponse(
+                    tool_calls=[
+                        LLMToolCall(
+                            id="race-write",
+                            name="create_page",
+                            arguments={"title": "Claimed Once", "position": 1},
+                        )
+                    ]
+                )
+            ]
+        )
+        initial = await collect_events(
+            AgentService(
+                setup_session,
+                provider,
+                max_tool_calls=4,
+                max_run_seconds=10,
+                tool_timeout_seconds=2,
+            ),
+            workspace_id,
+            "Create a page",
+        )
+        proposal = next(event["proposal"] for event in initial if event.get("type") == "proposal")
+        assert isinstance(proposal, dict)
+        tool_call_id = str(proposal["tool_call_id"])
+
+    async def claim() -> bool:
+        async with session_factory() as claim_session:
+            claimed = await AgentAuditRepository(claim_session).claim_tool_call_decision(
+                tool_call_id, "approved"
+            )
+            await claim_session.commit()
+            return claimed
+
+    claims = await asyncio.gather(claim(), claim())
+    assert sorted(claims) == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_stale_arguments_are_revalidated_before_approval(session: AsyncSession) -> None:
+    workspace_id, _ = await seed_workspace(session)
+    provider = FakeProvider(
+        [
+            LLMResponse(
+                tool_calls=[
+                    LLMToolCall(
+                        id="stale-write",
+                        name="create_page",
+                        arguments={"title": "Unsafe", "position": 1},
+                    )
+                ]
+            )
+        ]
+    )
+    service = AgentService(
+        session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
+    )
+    initial = await collect_events(service, workspace_id, "Create a page")
+    proposal = next(event["proposal"] for event in initial if event.get("type") == "proposal")
+    assert isinstance(proposal, dict)
+    tool_call = await AgentAuditRepository(session).get_tool_call(str(proposal["tool_call_id"]))
+    assert tool_call is not None
+    tool_call.arguments = {**tool_call.arguments, "sql": "DROP TABLE pages"}
+    await session.commit()
+
+    with pytest.raises(BadRequestError, match="invalid agent tool arguments"):
+        _ = [
+            event
+            async for event in service.decide(workspace_id, str(proposal["tool_call_id"]), True)
+        ]
+    assert [page.title for page in await PageService(session).list_pages(workspace_id)] == [
+        "Local AI"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_waiting_run_can_be_cancelled_and_cannot_resume(session: AsyncSession) -> None:
+    workspace_id, _ = await seed_workspace(session)
+    provider = FakeProvider(
+        [
+            LLMResponse(
+                tool_calls=[
+                    LLMToolCall(
+                        id="cancel-write",
+                        name="create_page",
+                        arguments={"title": "Cancelled", "position": 1},
+                    )
+                ]
+            )
+        ]
+    )
+    service = AgentService(
+        session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
+    )
+    initial = await collect_events(service, workspace_id, "Create a page")
+    run_id = str(initial[0]["run_id"])
+    proposal = next(event["proposal"] for event in initial if event.get("type") == "proposal")
+    assert isinstance(proposal, dict)
+
+    assert await cancel_persisted_agent_run(session, run_id)
+    with pytest.raises(BadRequestError, match="not waiting"):
+        _ = [
+            event
+            async for event in service.decide(workspace_id, str(proposal["tool_call_id"]), True)
+        ]
+    reconnected = [event async for event in service.reconnect(workspace_id, run_id)]
+    assert reconnected[-1] == {"type": "done", "status": "cancelled"}
+
+
+@pytest.mark.asyncio
+async def test_expired_waiting_run_times_out_without_execution(session: AsyncSession) -> None:
+    workspace_id, _ = await seed_workspace(session)
+    provider = FakeProvider(
+        [
+            LLMResponse(
+                tool_calls=[
+                    LLMToolCall(
+                        id="late-write",
+                        name="create_page",
+                        arguments={"title": "Too Late", "position": 1},
+                    )
+                ]
+            )
+        ]
+    )
+    service = AgentService(
+        session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
+    )
+    initial = await collect_events(service, workspace_id, "Create a page")
+    run_id = str(initial[0]["run_id"])
+    proposal = next(event["proposal"] for event in initial if event.get("type") == "proposal")
+    assert isinstance(proposal, dict)
+    run = await AgentAuditRepository(session).get_run(run_id)
+    assert run is not None
+    run.remaining_seconds = 0
+    await session.commit()
+
+    events = [
+        event async for event in service.decide(workspace_id, str(proposal["tool_call_id"]), True)
+    ]
+    assert events[-1] == {"type": "done", "status": "timed_out"}
+    assert [page.title for page in await PageService(session).list_pages(workspace_id)] == [
+        "Local AI"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_approval_enforces_workspace_isolation(session: AsyncSession) -> None:
+    workspace_id, _ = await seed_workspace(session)
+    other_workspace_id, _ = await seed_workspace(session, "Other Workspace")
+    provider = FakeProvider(
+        [
+            LLMResponse(
+                tool_calls=[
+                    LLMToolCall(
+                        id="isolated-write",
+                        name="create_page",
+                        arguments={"title": "Private", "position": 1},
+                    )
+                ]
+            )
+        ]
+    )
+    service = AgentService(
+        session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
+    )
+    initial = await collect_events(service, workspace_id, "Create a page")
+    proposal = next(event["proposal"] for event in initial if event.get("type") == "proposal")
+    assert isinstance(proposal, dict)
+
+    with pytest.raises(NotFoundError):
+        _ = [
+            event
+            async for event in service.decide(
+                other_workspace_id, str(proposal["tool_call_id"]), True
+            )
+        ]
 
 
 @pytest.mark.asyncio
@@ -381,7 +769,7 @@ async def test_circuit_breaker_stops_unbounded_tool_loop(session: AsyncSession) 
     )
 
     assert provider.count == 2
-    assert any(event.get("type") == "done" and event.get("status") == "stopped" for event in events)
+    assert any(event.get("type") == "done" and event.get("status") == "failed" for event in events)
     assert any("maximum tool calls" in str(event.get("message")) for event in events)
 
 
@@ -399,7 +787,7 @@ async def test_provider_failure_emits_safe_error(session: AsyncSession) -> None:
 
     assert any(event.get("type") == "error" for event in events)
     assert all("ConnectError" not in str(event) for event in events)
-    assert events[-1] == {"type": "done", "status": "error"}
+    assert events[-1] == {"type": "done", "status": "failed"}
 
 
 @pytest.mark.asyncio
@@ -416,7 +804,7 @@ async def test_provider_timeout_emits_specific_error(session: AsyncSession) -> N
 
     assert any("local model took too long" in str(event.get("message")) for event in events)
     assert all("maximum run duration" not in str(event) for event in events)
-    assert events[-1] == {"type": "done", "status": "error"}
+    assert events[-1] == {"type": "done", "status": "timed_out"}
 
 
 @pytest.mark.asyncio
@@ -442,7 +830,7 @@ async def test_agent_redacts_secrets_before_provider_call(session: AsyncSession)
     workspace_id, _ = await seed_workspace(session)
     provider = FakeProvider([LLMResponse(content="Done")])
 
-    await collect_events(
+    events = await collect_events(
         AgentService(
             session,
             provider,
@@ -457,6 +845,40 @@ async def test_agent_redacts_secrets_before_provider_call(session: AsyncSession)
     provider_messages = provider.calls[0]
     assert "super-secret-value" not in provider_messages[1].content
     assert "token=[REDACTED]" in provider_messages[1].content
+    run = await AgentAuditRepository(session).get_run(str(events[0]["run_id"]))
+    assert run is not None
+    assert "super-secret-value" not in json.dumps(run.messages)
+
+
+@pytest.mark.asyncio
+async def test_pending_tool_arguments_are_sanitized_in_audit(session: AsyncSession) -> None:
+    workspace_id, _ = await seed_workspace(session)
+    provider = FakeProvider(
+        [
+            LLMResponse(
+                tool_calls=[
+                    LLMToolCall(
+                        id="secret-write",
+                        name="create_file",
+                        arguments={"name": "notes.txt", "content": "token=private-value"},
+                    )
+                ]
+            )
+        ]
+    )
+    events = await collect_events(
+        AgentService(
+            session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
+        ),
+        workspace_id,
+        "Create a private note",
+    )
+    proposal = next(event["proposal"] for event in events if event.get("type") == "proposal")
+    assert isinstance(proposal, dict)
+    tool_call = await AgentAuditRepository(session).get_tool_call(str(proposal["tool_call_id"]))
+    assert tool_call is not None
+    assert "private-value" not in json.dumps(tool_call.arguments)
+    assert "[REDACTED]" in json.dumps(tool_call.arguments)
 
 
 def test_agent_sse_streams_text_sources_and_completion(api_client: TestClient) -> None:
@@ -484,3 +906,46 @@ def test_agent_sse_streams_text_sources_and_completion(api_client: TestClient) -
     assert page["id"] in response.text
     assert "event: text" in response.text
     assert "event: done" in response.text
+
+
+def test_agent_approval_sse_resumes_same_run_to_completion(api_client: TestClient) -> None:
+    workspace = api_client.post("/api/workspaces", json={"name": "Approval SSE"}).json()
+    provider = FakeProvider(
+        [
+            LLMResponse(
+                tool_calls=[
+                    LLMToolCall(
+                        id="api-write",
+                        name="create_page",
+                        arguments={"title": "Approved Page", "position": 0},
+                    )
+                ]
+            ),
+            LLMResponse(content="The page was created and verified."),
+        ]
+    )
+    app = cast(FastAPI, api_client.app)
+    app.dependency_overrides[get_llm_provider] = lambda: provider
+    initial = api_client.post(
+        f"/api/workspaces/{workspace['id']}/agent/runs",
+        json={"message": "Create an approved page"},
+    )
+    proposal_data = next(
+        json.loads(line.removeprefix("data: "))
+        for line in initial.text.splitlines()
+        if line.startswith("data: ") and '"type":"proposal"' in line
+    )
+    tool_call_id = proposal_data["proposal"]["tool_call_id"]
+
+    resumed = api_client.post(
+        f"/api/workspaces/{workspace['id']}/agent/tool-calls/{tool_call_id}/decision",
+        json={"approved": True},
+    )
+
+    assert resumed.status_code == 200
+    assert resumed.headers["content-type"].startswith("text/event-stream")
+    assert '"message":"Approved \\u2014 continuing..."' in resumed.text
+    assert "created and verified" in resumed.text
+    assert '"status":"completed"' in resumed.text
+    pages = api_client.get(f"/api/workspaces/{workspace['id']}/pages").json()["items"]
+    assert [page["title"] for page in pages] == ["Approved Page"]

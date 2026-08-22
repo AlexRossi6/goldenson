@@ -164,7 +164,7 @@ export function LocalAIManager({ onReadyChange }: LocalAIManagerProps) {
     setStartingRuntime(true)
     try {
       const runtime = await startLocalRuntime()
-      if (!runtime.reachable) setError(runtime.error ?? 'Ollama could not be started.')
+      if (!runtime.reachable) setError(runtime.error ?? 'Local AI could not be started.')
       await refresh()
     } finally {
       setStartingRuntime(false)
@@ -179,16 +179,16 @@ export function LocalAIManager({ onReadyChange }: LocalAIManagerProps) {
       progress: null,
       downloaded_bytes: null,
       total_bytes: null,
-      message: 'Starting Ollama download...',
+      message: 'Starting Local AI download...',
     })
     const controller = new AbortController()
     try {
       await installLocalRuntime(setRuntimeInstall, controller.signal)
       const runtime = await startLocalRuntime()
-      if (!runtime.reachable) setError(runtime.error ?? 'Ollama was installed but could not start.')
+      if (!runtime.reachable) setError(runtime.error ?? 'Local AI was installed but could not start.')
       await refresh()
     } catch (installError) {
-      setError(installError instanceof Error ? installError.message : 'Ollama installation failed.')
+      setError(installError instanceof Error ? installError.message : 'Local AI installation failed.')
     }
   }
 
@@ -223,23 +223,23 @@ export function LocalAIManager({ onReadyChange }: LocalAIManagerProps) {
 
             {status && !status.runtime.reachable && (
               <section className="runtime-callout">
-                <h3>{status.runtime.installed ? 'Ollama is not running' : 'Ollama is required'}</h3>
+                <h3>{status.runtime.installed ? 'Local AI is paused' : 'Set up Local AI'}</h3>
                 <p>{status.runtime.error}</p>
                 {status.runtime.installed ? (
                   <button type="button" className="button button-primary" onClick={() => void startRuntime()} disabled={startingRuntime}>
-                    {startingRuntime ? 'Starting...' : 'Start Ollama'}
+                    {startingRuntime ? 'Starting...' : 'Start Local AI'}
                   </button>
                 ) : (
                   <>
-                    <p className="local-ai-note">Ollama is the local engine that runs Qwen, Llama, and Gemma. GoldenSon never falls back to cloud AI.</p>
+                    <p className="local-ai-note">GoldenSon runs AI privately on this computer and never falls back to a cloud service.</p>
                     <button type="button" className="button button-primary" disabled={runtimeInstall !== null && runtimeInstall.state !== 'failed'} onClick={() => setRuntimeConfirmation(true)}>
-                      {runtimeInstall !== null && runtimeInstall.state !== 'failed' ? 'Installing Ollama...' : 'Install Ollama'}
+                      {runtimeInstall !== null && runtimeInstall.state !== 'failed' ? 'Installing Local AI...' : 'Install Local AI'}
                     </button>
                   </>
                 )}
                 {runtimeInstall && (
                   <div className="runtime-progress" aria-live="polite">
-                    <progress max={1} value={runtimeInstall.progress ?? undefined} aria-label="Installing Ollama" />
+                    <progress max={1} value={runtimeInstall.progress ?? undefined} aria-label="Installing Local AI" />
                     <span>{runtimeInstall.message}</span>
                     {runtimeInstall.downloaded_bytes !== null && runtimeInstall.total_bytes !== null && (
                       <strong>{Math.round((runtimeInstall.progress ?? 0) * 100)}% · {formatBytes(runtimeInstall.downloaded_bytes)} / {formatBytes(runtimeInstall.total_bytes)}</strong>
@@ -317,7 +317,7 @@ export function LocalAIManager({ onReadyChange }: LocalAIManagerProps) {
                             <button type="button" className="button button-secondary" onClick={() => void cancel(model)}>Cancel</button>
                           ) : (
                             <button type="button" className="button button-secondary" disabled={!status.runtime.reachable} onClick={() => setConfirmation({ kind: 'install', model })}>
-                              {!status.runtime.reachable ? 'Requires Ollama' : model.state === 'failed' || model.state === 'cancelled' ? 'Retry' : 'Install'}
+                              {!status.runtime.reachable ? 'Set up Local AI first' : model.state === 'failed' || model.state === 'cancelled' ? 'Retry' : 'Install'}
                             </button>
                           )}
                         </li>
@@ -351,12 +351,12 @@ export function LocalAIManager({ onReadyChange }: LocalAIManagerProps) {
             )}
 
             {runtimeConfirmation && (
-              <section className="model-confirmation" role="alertdialog" aria-modal="true" aria-label="Install Ollama">
-                <h3>Install Ollama?</h3>
-                <p>GoldenSon will download the official signed Ollama application from ollama.com and install it only in GoldenSon's local runtime folder. This requires an internet connection and does not install a model yet.</p>
+              <section className="model-confirmation" role="alertdialog" aria-modal="true" aria-label="Install Local AI">
+                <h3>Install Local AI?</h3>
+                <p>GoldenSon will download the official signed Ollama engine and keep it inside GoldenSon. This one-time setup requires an internet connection; your workspace content remains on this computer.</p>
                 <div className="dialog-actions">
                   <button type="button" className="button button-secondary" onClick={() => setRuntimeConfirmation(false)}>Cancel</button>
-                  <button type="button" className="button button-primary" onClick={() => void installRuntime()}>Install Ollama</button>
+                  <button type="button" className="button button-primary" onClick={() => void installRuntime()}>Install Local AI</button>
                 </div>
               </section>
             )}

@@ -2,6 +2,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { AgentEvent } from '../../api/agent'
 import { AssistantPanel } from './AssistantPanel'
 
 const apiMocks = vi.hoisted(() => ({
@@ -89,6 +90,7 @@ describe('AssistantPanel', () => {
 
   it('shows a proposed change and sends approval explicitly', async () => {
     const user = userEvent.setup()
+    const onWorkspaceChanged = vi.fn()
     apiMocks.streamAgentRun.mockImplementation(async (_workspaceId, _message, onEvent) => {
       onEvent({
         type: 'proposal',
@@ -102,8 +104,25 @@ describe('AssistantPanel', () => {
       })
       onEvent({ type: 'done', status: 'awaiting_approval' })
     })
-    apiMocks.decideAgentProposal.mockResolvedValue({ status: 'completed' })
-    render(<AssistantPanel workspaceId="workspace-1" onSelectPage={vi.fn()} />)
+    apiMocks.decideAgentProposal.mockImplementation(
+      async (_workspaceId, _toolCallId, _approved, onEvent) => {
+        onEvent({ type: 'activity', message: 'Approved, continuing...' })
+        onEvent({
+          type: 'workspace_changed',
+          tool_name: 'create_page',
+          result: { id: 'page-2', title: 'Draft' },
+        })
+        onEvent({ type: 'text', content: 'Draft created.' })
+        onEvent({ type: 'done', status: 'completed' })
+      },
+    )
+    render(
+      <AssistantPanel
+        workspaceId="workspace-1"
+        onSelectPage={vi.fn()}
+        onWorkspaceChanged={onWorkspaceChanged}
+      />,
+    )
 
     const question = screen.getByLabelText('Ask the workspace assistant')
     await waitFor(() => expect(question).toBeEnabled())
@@ -112,8 +131,20 @@ describe('AssistantPanel', () => {
     expect(await screen.findByText('Create page "Draft".')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Approve' }))
-    expect(apiMocks.decideAgentProposal).toHaveBeenCalledWith('workspace-1', 'tool-1', true)
-    expect(await screen.findByText('Change applied.')).toBeInTheDocument()
+    expect(apiMocks.decideAgentProposal).toHaveBeenCalledWith(
+      'workspace-1',
+      'tool-1',
+      true,
+      expect.any(Function),
+      expect.any(AbortSignal),
+    )
+    expect(await screen.findByText('Approved, continuing...')).toBeInTheDocument()
+    expect(screen.getByText('Draft created.')).toBeInTheDocument()
+    expect(onWorkspaceChanged).toHaveBeenCalledWith({
+      type: 'workspace_changed',
+      tool_name: 'create_page',
+      result: { id: 'page-2', title: 'Draft' },
+    })
   })
 
   it('aborts and cancels a running request', async () => {
@@ -136,5 +167,39 @@ describe('AssistantPanel', () => {
     await waitFor(() => expect(capturedSignal?.aborted).toBe(true))
     expect(apiMocks.cancelAgentRun).toHaveBeenCalledWith('run-1')
     expect(screen.getByText('Cancelled.')).toBeInTheDocument()
+  })
+
+  it('shows active progress while the local model is preparing an answer', async () => {
+    const user = userEvent.setup()
+    const callback: { send?: (event: AgentEvent) => void } = {}
+    apiMocks.streamAgentRun.mockImplementation((_workspaceId, _message, onEvent) => {
+      callback.send = onEvent
+      onEvent({ type: 'activity', message: 'Searching your workspace...' })
+      return new Promise<void>(() => undefined)
+    })
+    render(<AssistantPanel workspaceId="workspace-1" onSelectPage={vi.fn()} />)
+
+    const question = screen.getByLabelText('Ask the workspace assistant')
+    await waitFor(() => expect(question).toBeEnabled())
+    await user.type(question, 'Summarize my notes')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Searching your workspace')
+    callback.send?.({ type: 'sources', sources: [] })
+    expect(await screen.findByRole('status')).toHaveTextContent('Thinking')
+  })
+
+  it('collapses and expands the responsive assistant content', async () => {
+    const user = userEvent.setup()
+    render(<AssistantPanel workspaceId="workspace-1" onSelectPage={vi.fn()} />)
+
+    const collapse = screen.getByRole('button', { name: 'Collapse assistant' })
+    expect(collapse).toHaveAttribute('aria-expanded', 'true')
+    await user.click(collapse)
+
+    const expand = screen.getByRole('button', { name: 'Expand assistant' })
+    expect(expand).toHaveAttribute('aria-expanded', 'false')
+    await user.click(expand)
+    expect(screen.getByRole('button', { name: 'Collapse assistant' })).toBeInTheDocument()
   })
 })

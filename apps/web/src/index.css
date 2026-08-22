@@ -215,6 +215,10 @@ label {
 }
 
 .assistant-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   padding-bottom: 0.9rem;
   border-bottom: 1px solid var(--line);
 }
@@ -222,6 +226,10 @@ label {
 .assistant-header h2 {
   margin: 0.2rem 0 0;
   font-size: 1.4rem;
+}
+
+.assistant-toggle {
+  display: none;
 }
 
 .local-ai-summary {
@@ -461,6 +469,26 @@ label {
   list-style: none;
 }
 
+.assistant-progress {
+  margin: 0 0 1rem;
+  color: var(--muted-ink);
+  font-family: 'DM Mono', 'Courier New', monospace;
+  font-size: 0.76rem;
+}
+
+.assistant-progress::after {
+  display: inline-block;
+  width: 1.25rem;
+  content: '···';
+  animation: assistant-pulse 1.2s steps(3, end) infinite;
+}
+
+@keyframes assistant-pulse {
+  0% { opacity: 0.3; }
+  50% { opacity: 1; }
+  100% { opacity: 0.3; }
+}
+
 .assistant-answer {
   line-height: 1.55;
   white-space: pre-wrap;
@@ -609,9 +637,7 @@ h1 {
 
 .empty-card,
 .editor-shell,
-.new-block-card,
 .move-card,
-.block-card,
 .empty-box {
   border: 1px solid var(--ink);
   background: var(--paper);
@@ -655,12 +681,26 @@ h1 {
   outline: none;
 }
 
-.move-card,
-.new-block-card,
-.block-card {
+.move-card {
   padding: 0.85rem;
   border-color: var(--line);
   background: rgba(255, 255, 255, 0.52);
+}
+
+.new-block-card {
+  padding: 0.25rem 0.35rem;
+}
+
+.add-block-toggle {
+  color: var(--muted-ink);
+  font-family: 'DM Mono', 'Courier New', monospace;
+  font-size: 0.76rem;
+}
+
+.block-type-option {
+  padding-inline: 0.45rem;
+  border-left: 1px solid var(--line);
+  font-size: 0.8rem;
 }
 
 .block-list,
@@ -672,22 +712,44 @@ h1 {
 
 .block-list {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.15rem;
 }
 
-.block-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.6rem;
-  font-family: 'DM Mono', 'Courier New', monospace;
-  font-size: 0.74rem;
+.block-card {
+  position: relative;
+  padding: 0.2rem 2.5rem 0.2rem 0.35rem;
+  border-radius: 4px;
+  background: transparent;
+}
+
+.block-card:hover,
+.block-card:focus-within {
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.block-context-actions {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.35rem;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.block-card:hover .block-context-actions,
+.block-card:focus-within .block-context-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.block-delete {
+  font-size: 0.7rem;
 }
 
 .block-content {
   display: grid;
   gap: 0.5rem;
-  margin: 0.5rem 0;
+  margin: 0;
 }
 
 .block-display {
@@ -702,8 +764,7 @@ h1 {
 }
 
 .block-display:hover,
-.block-display:focus-visible,
-.block-card.is-editing {
+.block-display:focus-visible {
   border-color: var(--line);
   outline: none;
   background: rgba(255, 255, 255, 0.7);
@@ -711,11 +772,6 @@ h1 {
 
 .block-display pre {
   pointer-events: none;
-}
-
-.code-editor {
-  min-height: 140px;
-  font-family: 'DM Mono', monospace;
 }
 
 .block-content p,
@@ -727,13 +783,20 @@ h1 {
   font-size: 1.5rem;
 }
 
-.block-content pre {
+.inline-code-shell {
   margin: 0;
   padding: 0.8rem;
   overflow-x: auto;
   background: var(--ink);
   color: #fff;
   font-family: 'DM Mono', monospace;
+}
+
+.inline-code {
+  display: block;
+  min-height: 1.4em;
+  outline: none;
+  white-space: pre;
 }
 
 .todo-row {
@@ -1057,18 +1120,6 @@ h1 {
   color: var(--muted-ink);
 }
 
-.bottom-meta {
-  margin-top: 1.2rem;
-  padding-top: 0.7rem;
-  border-top: 1px solid var(--line);
-  display: flex;
-  gap: 0.8rem;
-  flex-wrap: wrap;
-  font-family: 'DM Mono', 'Courier New', monospace;
-  font-size: 0.74rem;
-  color: var(--muted-ink);
-}
-
 .card-grid {
   display: grid;
   gap: 1.2rem;
@@ -1194,6 +1245,24 @@ h3 {
     min-height: 420px;
     border-top: 1px solid var(--ink);
     border-left: 0;
+  }
+
+  .assistant-toggle {
+    display: grid;
+  }
+
+  .assistant-panel.is-collapsed {
+    min-height: 0;
+    padding-bottom: 1rem;
+  }
+
+  .assistant-panel.is-collapsed > :not(.assistant-header) {
+    display: none;
+  }
+
+  .assistant-panel.is-collapsed .assistant-header {
+    padding-bottom: 0;
+    border-bottom: 0;
   }
 }
 

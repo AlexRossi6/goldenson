@@ -18,12 +18,19 @@ export type AgentProposal = {
   expected_effect: string
 }
 
+export type AgentWorkspaceChange = {
+  type: 'workspace_changed'
+  tool_name: string
+  result: Record<string, unknown>
+}
+
 export type AgentEvent =
   | { type: 'run'; run_id: string }
   | { type: 'activity'; message: string }
   | { type: 'sources'; sources: AgentSource[] }
   | { type: 'text'; content: string }
   | { type: 'proposal'; proposal: AgentProposal }
+  | AgentWorkspaceChange
   | { type: 'error'; message: string }
   | { type: 'done'; status: string }
 
@@ -37,20 +44,12 @@ function parseEvent(block: string): AgentEvent | null {
   return JSON.parse(data) as AgentEvent
 }
 
-export async function streamAgentRun(
-  workspaceId: string,
-  message: string,
+async function consumeAgentEvents(
+  response: Response,
   onEvent: (event: AgentEvent) => void,
-  signal: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(apiUrl(`/workspaces/${workspaceId}/agent/runs`), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-    body: JSON.stringify({ message }),
-    signal,
-  })
   if (!response.ok || !response.body) {
-    throw new Error('The local agent could not start.')
+    throw new Error('The assistant could not continue.')
   }
 
   const reader = response.body.getReader()
@@ -71,15 +70,51 @@ export async function streamAgentRun(
   if (finalEvent) onEvent(finalEvent)
 }
 
+export async function streamAgentRun(
+  workspaceId: string,
+  message: string,
+  onEvent: (event: AgentEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const response = await fetch(apiUrl(`/workspaces/${workspaceId}/agent/runs`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify({ message }),
+    signal,
+  })
+  if (!response.ok || !response.body) {
+    throw new Error('The assistant could not start.')
+  }
+  await consumeAgentEvents(response, onEvent)
+}
+
 export async function decideAgentProposal(
   workspaceId: string,
   toolCallId: string,
   approved: boolean,
-): Promise<{ status: string }> {
-  return apiRequest(`/workspaces/${workspaceId}/agent/tool-calls/${toolCallId}/decision`, {
+  onEvent: (event: AgentEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const response = await fetch(apiUrl(`/workspaces/${workspaceId}/agent/tool-calls/${toolCallId}/decision`), {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
     body: JSON.stringify({ approved }),
+    signal,
   })
+  await consumeAgentEvents(response, onEvent)
+}
+
+export async function reconnectAgentRun(
+  workspaceId: string,
+  runId: string,
+  onEvent: (event: AgentEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const response = await fetch(apiUrl(`/workspaces/${workspaceId}/agent/runs/${runId}/events`), {
+    headers: { Accept: 'text/event-stream' },
+    signal,
+  })
+  await consumeAgentEvents(response, onEvent)
 }
 
 export async function cancelAgentRun(runId: string): Promise<void> {
