@@ -1,6 +1,6 @@
 # GoldenSon
 
-Monorepo foundation for a local-first AI knowledge workspace.
+Monorepo foundation for a local AI knowledge workspace.
 
 This repository currently contains only development and tooling setup.
 No product features are implemented yet.

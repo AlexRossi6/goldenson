@@ -379,6 +379,74 @@ h1 {
   align-items: center;
   gap: 0.55rem;
   font-size: 1.05rem;
+  margin-bottom: 0.35rem;
+}
+
+.todo-block {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.inline-document {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.inline-text {
+  min-width: 0;
+  min-height: 1.5em;
+  padding: 0.15rem 0.25rem;
+  border: 1px solid transparent;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+
+.inline-text:hover,
+.inline-text:focus {
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.inline-text:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.markdown-level-1,
+.markdown-level-2,
+.markdown-level-3,
+.markdown-level-4,
+.markdown-level-5,
+.markdown-level-6 {
+  font-family: 'Newsreader', Georgia, serif;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.markdown-level-1 { font-size: 2rem; }
+.markdown-level-2 { font-size: 1.65rem; }
+.markdown-level-3 { font-size: 1.35rem; }
+.markdown-level-4 { font-size: 1.15rem; }
+.markdown-level-5 { font-size: 1.05rem; }
+.markdown-level-6 { font-size: 1rem; }
+
+.todo-title {
+  margin-bottom: 0.25rem;
+  font-family: 'Newsreader', Georgia, serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.todo-item {
+  flex: 1;
+}
+
+.todo-item.is-completed {
+  color: var(--muted);
+  text-decoration: line-through;
 }
 
 .todo-row .block-display {
@@ -512,6 +580,20 @@ h1 {
   border: 1px solid var(--ink);
   background: #fff;
   cursor: pointer;
+  box-shadow: 0 1px 3px rgba(23, 37, 31, 0.12);
+  transition: all 0.05s ease-out;
+  border-radius: 2px;
+}
+
+.tree-expand:hover,
+.tree-icon:hover {
+  box-shadow: 0 2px 4px rgba(23, 37, 31, 0.15);
+}
+
+.tree-expand:active,
+.tree-icon:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 2px rgba(23, 37, 31, 0.08);
 }
 
 .tree-spacer {
@@ -526,6 +608,12 @@ h1 {
   cursor: pointer;
   padding: 0.35rem 0.45rem;
   font: inherit;
+  transition: all 0.05s ease-out;
+  border-radius: 2px;
+}
+
+.tree-page:active {
+  transform: translateY(1px);
 }
 
 .tree-page.is-selected {
@@ -564,6 +652,18 @@ h1 {
   font-family: 'DM Mono', 'Courier New', monospace;
   cursor: pointer;
   background: #fff;
+  box-shadow: 0 2px 4px rgba(23, 37, 31, 0.15);
+  transition: all 0.05s ease-out;
+  border-radius: 2px;
+}
+
+.button:hover:not(:disabled) {
+  box-shadow: 0 4px 8px rgba(23, 37, 31, 0.2);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 2px rgba(23, 37, 31, 0.1);
 }
 
 .button:disabled {

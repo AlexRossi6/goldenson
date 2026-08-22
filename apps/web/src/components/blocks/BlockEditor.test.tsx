@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -41,7 +41,7 @@ describe('BlockEditor', () => {
     expect(onCreateBlock).toHaveBeenCalledWith({
       type: 'paragraph',
       position: 0,
-      content: { text: 'Start writing...' },
+      content: { text: '' },
     })
   })
 
@@ -60,15 +60,15 @@ describe('BlockEditor', () => {
       />,
     )
 
-    expect(screen.getByRole('heading', { name: 'Hello' })).toBeInTheDocument()
-    expect(screen.getAllByText('Hello')).toHaveLength(2)
+    expect(screen.getByRole('textbox', { name: 'Heading content' })).toHaveTextContent('Hello')
+    expect(screen.getByRole('textbox', { name: 'Paragraph line 1' })).toHaveTextContent('Hello')
     expect(screen.getByText('Heading')).toBeInTheDocument()
     expect(screen.getByText('Paragraph')).toBeInTheDocument()
     expect(screen.getByText('Review notes')).toBeInTheDocument()
     expect(screen.getByText('echo hello')).toBeInTheDocument()
   })
 
-  it('edits paragraph and heading text on click and saves on blur', async () => {
+  it('edits paragraph and heading text directly in rendered content and persists on blur', async () => {
     const user = userEvent.setup()
     const onUpdateBlock = vi.fn().mockResolvedValue(undefined)
     render(
@@ -80,14 +80,16 @@ describe('BlockEditor', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Edit paragraph' }))
-    const paragraphInput = screen.getByRole('textbox', { name: 'paragraph content' })
+    expect(screen.queryByRole('button', { name: 'Edit paragraph' })).not.toBeInTheDocument()
+    const paragraphInput = screen.getByRole('textbox', { name: 'Paragraph line 1' })
+    await user.click(paragraphInput)
     await user.clear(paragraphInput)
     await user.type(paragraphInput, 'Updated draft')
     await user.tab()
 
-    await user.click(screen.getByRole('button', { name: 'Edit heading' }))
-    const headingInput = screen.getByRole('textbox', { name: 'heading content' })
+    const headingInput = screen.getByRole('textbox', { name: 'Heading content' })
+    expect(headingInput).toHaveClass('markdown-level-2')
+    await user.click(headingInput)
     await user.clear(headingInput)
     await user.type(headingInput, 'Updated title')
     await user.tab()
@@ -96,27 +98,173 @@ describe('BlockEditor', () => {
     expect(onUpdateBlock).toHaveBeenNthCalledWith(2, 'heading', { version: 1, content: { text: 'Updated title' } })
   })
 
-  it('edits todo text, toggles its checkbox, and saves both changes', async () => {
+  it('renders a true paragraph placeholder without storing it as content', () => {
+    render(
+      <BlockEditor
+        blocks={[makeBlock({ id: 'paragraph', page_id: 'p1', type: 'paragraph', content: { text: '' } })]}
+        onCreateBlock={vi.fn().mockResolvedValue(undefined)}
+        onUpdateBlock={vi.fn().mockResolvedValue(undefined)}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    const paragraph = screen.getByRole('textbox', { name: 'Paragraph line 1' })
+    expect(paragraph).toBeEmptyDOMElement()
+    expect(paragraph).toHaveAttribute('data-placeholder', 'Start writing...')
+  })
+
+  it('renders Markdown headings live on the same editable surface and persists the source syntax', async () => {
     const user = userEvent.setup()
     const onUpdateBlock = vi.fn().mockResolvedValue(undefined)
     render(
       <BlockEditor
-        blocks={[makeBlock({ id: 'todo', page_id: 'p1', type: 'todo', content: { text: 'Buy groceries', checked: false } })]}
+        blocks={[makeBlock({ id: 'paragraph', page_id: 'p1', type: 'paragraph', content: { text: '' } })]}
         onCreateBlock={vi.fn().mockResolvedValue(undefined)}
         onUpdateBlock={onUpdateBlock}
         onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Edit todo' }))
-    const todoInput = screen.getByRole('textbox', { name: 'To-do text' })
-    await user.clear(todoInput)
-    await user.type(todoInput, 'Buy tea')
-    await user.tab()
-    await user.click(screen.getByRole('checkbox', { name: 'Mark Buy groceries complete' }))
+    const paragraph = screen.getByRole('textbox', { name: 'Paragraph line 1' })
+    await user.click(paragraph)
+    await user.type(paragraph, '## Test')
 
-    expect(onUpdateBlock).toHaveBeenCalledWith('todo', { version: 1, content: { text: 'Buy tea', checked: false } })
-    expect(onUpdateBlock).toHaveBeenLastCalledWith('todo', { version: 1, content: { text: 'Buy tea', checked: true } })
+    await waitFor(() => {
+      expect(paragraph).toHaveClass('markdown-level-2')
+    })
+    expect(paragraph).toHaveTextContent('Test')
+    expect(screen.queryByText('## Test')).not.toBeInTheDocument()
+
+    await user.tab()
+    expect(onUpdateBlock).toHaveBeenCalledWith('paragraph', { version: 1, content: { text: '## Test' } })
+  })
+
+  it('edits todo titles and items inline and persists their values', async () => {
+    const user = userEvent.setup()
+    const onUpdateBlock = vi.fn().mockResolvedValue(undefined)
+    render(
+      <BlockEditor
+        blocks={[makeBlock({ id: 'todo', page_id: 'p1', type: 'todo', content: { title: '', items: [{ id: 'item1', text: '', completed: false }] } })]}
+        onCreateBlock={vi.fn().mockResolvedValue(undefined)}
+        onUpdateBlock={onUpdateBlock}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    const title = screen.getByRole('textbox', { name: 'Todo title' })
+    const item = screen.getByRole('textbox', { name: 'Todo item 1' })
+    expect(title).toBeEmptyDOMElement()
+    expect(title).toHaveAttribute('data-placeholder', 'Task list title...')
+    expect(item).toBeEmptyDOMElement()
+    expect(item).toHaveAttribute('data-placeholder', 'What needs to be done?')
+
+    await user.click(title)
+    await user.type(title, 'Research local AI')
+    await user.click(item)
+    await user.type(item, 'Compare Ollama')
+    await user.tab()
+
+    expect(title).toHaveTextContent('Research local AI')
+    expect(item).toHaveTextContent('Compare Ollama')
+    expect(onUpdateBlock).toHaveBeenLastCalledWith('todo', {
+      version: 1,
+      content: { title: 'Research local AI', items: [{ id: 'item1', text: 'Compare Ollama', completed: false }] },
+    })
+  })
+
+  it('creates and focuses another todo item with Enter', async () => {
+    const user = userEvent.setup()
+    const onUpdateBlock = vi.fn().mockResolvedValue(undefined)
+    render(
+      <BlockEditor
+        blocks={[makeBlock({ id: 'todo', page_id: 'p1', type: 'todo', content: { title: 'Research', items: [{ id: 'item1', text: 'Compare Ollama', completed: false }] } })]}
+        onCreateBlock={vi.fn().mockResolvedValue(undefined)}
+        onUpdateBlock={onUpdateBlock}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    const firstItem = screen.getByRole('textbox', { name: 'Todo item 1' })
+    await user.click(firstItem)
+    await user.keyboard('{End}{Enter}')
+
+    const secondItem = await screen.findByRole('textbox', { name: 'Todo item 2' })
+    await waitFor(() => expect(secondItem).toHaveFocus())
+    await user.type(secondItem, 'Compare llama.cpp')
+    await user.tab()
+
+    expect(secondItem).toHaveTextContent('Compare llama.cpp')
+    expect(onUpdateBlock).toHaveBeenLastCalledWith('todo', {
+      version: 1,
+      content: {
+        title: 'Research',
+        items: [
+          { id: 'item1', text: 'Compare Ollama', completed: false },
+          expect.objectContaining({ text: 'Compare llama.cpp', completed: false }),
+        ],
+      },
+    })
+  })
+
+  it('removes an empty todo item with Backspace and focuses the previous item', async () => {
+    const user = userEvent.setup()
+    const onUpdateBlock = vi.fn().mockResolvedValue(undefined)
+    render(
+      <BlockEditor
+        blocks={[makeBlock({
+          id: 'todo',
+          page_id: 'p1',
+          type: 'todo',
+          content: {
+            title: 'Research',
+            items: [
+              { id: 'item1', text: 'Compare Ollama', completed: false },
+              { id: 'item2', text: '', completed: false },
+            ],
+          },
+        })]}
+        onCreateBlock={vi.fn().mockResolvedValue(undefined)}
+        onUpdateBlock={onUpdateBlock}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    const firstItem = screen.getByRole('textbox', { name: 'Todo item 1' })
+    const emptyItem = screen.getByRole('textbox', { name: 'Todo item 2' })
+    await user.click(emptyItem)
+    await user.keyboard('{Backspace}')
+
+    expect(screen.queryByRole('textbox', { name: 'Todo item 2' })).not.toBeInTheDocument()
+    await waitFor(() => expect(firstItem).toHaveFocus())
+    expect(onUpdateBlock).toHaveBeenCalledWith('todo', {
+      version: 1,
+      content: { title: 'Research', items: [{ id: 'item1', text: 'Compare Ollama', completed: false }] },
+    })
+  })
+
+  it('toggles a todo checkbox without changing editing surfaces', async () => {
+    const user = userEvent.setup()
+    const onUpdateBlock = vi.fn().mockResolvedValue(undefined)
+    render(
+      <BlockEditor
+        blocks={[makeBlock({ id: 'todo', page_id: 'p1', type: 'todo', content: { title: 'Research', items: [{ id: 'item1', text: 'Test embeddings', completed: false }] } })]}
+        onCreateBlock={vi.fn().mockResolvedValue(undefined)}
+        onUpdateBlock={onUpdateBlock}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    const checkbox = screen.getByRole('checkbox', { name: 'Mark Test embeddings complete' })
+    const item = screen.getByRole('textbox', { name: 'Todo item 1' })
+    await user.click(checkbox)
+
+    expect(checkbox).toBeChecked()
+    expect(item).toHaveClass('is-completed')
+    expect(screen.getByRole('textbox', { name: 'Todo title' })).toBeInTheDocument()
+    expect(onUpdateBlock).toHaveBeenCalledWith('todo', {
+      version: 1,
+      content: { title: 'Research', items: [{ id: 'item1', text: 'Test embeddings', completed: true }] },
+    })
   })
 
   it('edits code and retains the editing state when saving conflicts', async () => {

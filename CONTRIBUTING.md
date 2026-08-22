@@ -5,7 +5,7 @@ Thanks for contributing to GoldenSon.
 ## Development principles
 
 - Keep changes minimal and focused.
-- Follow local-first and privacy requirements in `docs/vision.md`.
+- Follow local and privacy requirements in `docs/vision.md`.
 - Do not add product features unless explicitly requested.
 
 ## Setup

@@ -27,7 +27,7 @@ export function NewPageForm({ pages, title, parentId, pending, onTitleChange, on
         onChange={(event) => onTitleChange(event.target.value)}
       />
       <select aria-label="Optional parent page" value={parentId ?? ''} onChange={(event) => onParentChange(event.target.value || null)}>
-        <option value="">Root page</option>
+        <option value="">Top level</option>
         {pages.map((page) => <option key={page.id} value={page.id}>{page.title}</option>)}
       </select>
       <button type="submit" className="button button-primary" disabled={!title.trim() || pending}>

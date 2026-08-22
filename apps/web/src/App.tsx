@@ -425,7 +425,7 @@ function App() {
 
       <main className="main-panel">
         <header className="topbar">
-          <p className="eyebrow">Local-first AI knowledge workspace</p>
+          <p className="eyebrow">local AI knowledge workspace</p>
           <h1>Workspace editor</h1>
           <p className="lead">
             Navigate pages, create nested content, edit blocks, and persist every change through the API.

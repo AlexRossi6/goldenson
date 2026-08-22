@@ -14,7 +14,7 @@ Include:
 
 ## Scope
 
-This project is local-first and privacy-focused. Vulnerability reports related to:
+This project is local and privacy-focused. Vulnerability reports related to:
 
 - unintended data exposure
 - unsafe file access
