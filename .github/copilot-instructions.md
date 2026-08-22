@@ -2,7 +2,7 @@
 
 ## Project
 
-This repository contains an open-source, local-first AI knowledge workspace.
+This repository contains an open-source, fully local AI knowledge workspace.
 
 The product vision is documented in:
 
@@ -16,11 +16,15 @@ Implement only the scope explicitly requested by the current task.
 
 ## Core principles
 
-### Local-first
+### Fully local by default
 
-User workspace data must remain local by default.
+GoldenSon's core functionality must work entirely on the user's device without an internet connection, cloud account, external API, or external service.
 
-Never send workspace content to an external service unless the user explicitly configured that service.
+Workspace data, files, database contents, search indexes, embeddings, AI conversations, and local AI inference must remain on the user's machine by default.
+
+External services may be supported as explicit, opt-in integrations in the future, but they must never be required for core functionality.
+
+Never silently send workspace content to an external service.
 
 Never silently fall back from a local AI provider to a cloud provider.
 
@@ -196,14 +200,23 @@ Use an abstraction such as:
 
 LLMProvider
 
-The application should support OpenAI-compatible HTTP inference providers.
+The core application must support local inference without requiring an external service.
 
-Potential providers include:
+Use an abstraction such as LLMProvider.
 
-- llama.cpp
-- Ollama
-- vLLM
-- cloud providers
+Initial local inference runtimes may include:
+
+llama.cpp
+Ollama
+other local OpenAI-compatible runtimes
+
+vLLM may be supported later as an optional local inference provider, but must not be a required application dependency.
+
+Cloud LLM providers may eventually be implemented as explicit opt-in integrations.
+
+Never silently fall back from local inference to cloud inference.
+
+Do not install models automatically as part of normal application setup.
 
 Do not make vLLM a required dependency.
 

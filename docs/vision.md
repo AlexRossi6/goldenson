@@ -1,8 +1,8 @@
 # Product Vision
 
-## Local-First AI Knowledge Workspace
+## Fully Local AI Knowledge Workspace
 
-An open-source, local-first personal knowledge workspace where users own their data and can run powerful AI assistants and agents alongside it.
+An open-source, fully local personal knowledge workspace where users own their data and can run powerful AI assistants and agents entirely on their own machine.
 
 The goal is not simply:
 
@@ -72,42 +72,27 @@ It can:
 
 ---
 
-## Local-first
+## Fully local by default
 
-The default configuration should keep:
+GoldenSon's core experience is designed to operate entirely on the user's machine.
 
-- workspace data
-- files
-- database
-- embeddings
-- inference
+By default:
 
-on the user's machine.
+workspace data stays local
+files stay local
+SQLite stays local
+search indexes stay local
+embeddings stay local
+AI conversations stay local
+inference runs locally
 
-Cloud storage and cloud AI are optional.
+GoldenSon must remain useful without an internet connection.
 
-Cloud storage does not imply cloud AI.
+External services may eventually be supported through explicit integrations, such as cloud storage or cloud AI providers. These integrations must be opt-in and clearly visible to the user.
 
-Local AI does not imply local storage only.
+Connecting a cloud storage provider must not automatically send workspace content to a cloud AI provider.
 
-Users should be able to mix providers.
-
-Example:
-
-Storage: Google Drive
-AI: local llama.cpp
-
-or:
-
-Storage: local
-AI: local Ollama
-
-or eventually:
-
-Storage: S3
-AI: cloud provider
-
-The user explicitly controls these choices.
+Connecting a cloud AI provider must be an explicit user decision.
 
 ---
 
@@ -227,15 +212,15 @@ This can evolve into a personal knowledge graph.
 ## Roadmap
 
 ### Phase 1
-Foundation
+Fully Local Foundation
 
 - workspace
 - pages
 - editor
 - files
-- search
-- embeddings
-- local AI
+- local search
+- local embeddings
+- local AI inference
 - assistant
 - agent
 - approvals
