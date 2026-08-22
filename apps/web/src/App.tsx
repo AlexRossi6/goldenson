@@ -5,6 +5,7 @@ import { createBlock, deleteBlock, listBlocks, updateBlock } from './api/blocks'
 import { deleteFile, listFiles, listPageFiles, uploadFile } from './api/files'
 import { createPage, deletePage, getPage, listPages, updatePage } from './api/pages'
 import { createWorkspace, listWorkspaces } from './api/workspaces'
+import { AssistantPanel } from './components/assistant/AssistantPanel'
 import { PageEditor } from './components/pages/PageEditor'
 import { MovePageDialog } from './components/pages/MovePageDialog'
 import { PageTree } from './components/sidebar/PageTree'
@@ -474,6 +475,7 @@ function App() {
           <span>Selected: {selectedPageId ? pageLookup.get(selectedPageId)?.title ?? 'Unknown' : 'None'}</span>
         </footer>
       </main>
+      <AssistantPanel workspaceId={workspace.id} onSelectPage={setSelectedPageId} />
       {selectedPage && <MovePageDialog key={`${selectedPage.id}-${moveDialogOpen}`} page={selectedPage} pages={pageList} open={moveDialogOpen} busy={updatePageMutation.isPending} onCancel={() => setMoveDialogOpen(false)} onMove={moveCurrentPage} />}
       <ConfirmDialog
         open={Boolean(deleteTarget)}

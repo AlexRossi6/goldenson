@@ -52,6 +52,37 @@ class FileService:
             self._storage.delete_file(stored.storage_key)
             raise
 
+    async def create_text_file(
+        self,
+        workspace_id: str,
+        name: str,
+        content: str,
+        page_id: str | None,
+    ) -> FileMetadata:
+        workspace = await self._workspace_repository.get_by_id(workspace_id)
+        if workspace is None:
+            raise NotFoundError("workspace not found")
+        if page_id is not None:
+            page = await self._page_repository.get_by_id(page_id)
+            if page is None or page.workspace_id != workspace_id:
+                raise BadRequestError("file page must belong to the same workspace")
+
+        stored = self._storage.store_content(
+            content.encode("utf-8"), workspace_id, self._max_upload_size
+        )
+        try:
+            return await self._repository.create(
+                workspace_id=workspace_id,
+                page_id=page_id,
+                name=name,
+                storage_key=stored.storage_key,
+                mime_type="text/plain",
+                size=stored.size,
+            )
+        except Exception:
+            self._storage.delete_file(stored.storage_key)
+            raise
+
     def download_path(self, file_metadata: FileMetadata) -> Path:
         return self._storage.resolve_file(file_metadata.storage_key)
 

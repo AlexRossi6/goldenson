@@ -30,6 +30,23 @@ Health endpoint:
 
 - `GET http://127.0.0.1:8000/api/health`
 
+## Local agent
+
+GoldenSon detects and starts Ollama on the local machine, then manages model downloads and
+selection from the **Models** dialog. On macOS, if Ollama is missing, choose **Install Ollama**
+to download the official signed application into GoldenSon's private runtime directory. No model
+name, inference endpoint, system-wide installation, or administrator access is required.
+
+The optional runtime setting is:
+
+```bash
+GOLDENSON_OLLAMA_BASE_URL=http://127.0.0.1:11434
+GOLDENSON_OLLAMA_RUNTIME_ROOT=~/.goldenson/runtime
+```
+
+The endpoint is restricted to loopback. GoldenSon downloads only models from its supported local
+catalog and never sends workspace data to a cloud provider or falls back to one.
+
 ## Run frontend
 
 ```bash

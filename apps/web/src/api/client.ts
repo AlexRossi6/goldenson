@@ -2,6 +2,10 @@ import { ApiClientError, type ApiErrorShape } from '../types/api'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
+export function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path}`
+}
+
 function isErrorShape(input: unknown): input is ApiErrorShape {
   if (!input || typeof input !== 'object') {
     return false
@@ -36,7 +40,7 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   const headers = init?.body instanceof FormData
     ? { ...(init?.headers ?? {}) }
     : { 'Content-Type': 'application/json', ...(init?.headers ?? {}) }
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(apiUrl(path), {
     ...init,
     headers,
   })
