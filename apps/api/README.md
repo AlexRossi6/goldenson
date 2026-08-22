@@ -1,15 +1,19 @@
 # GoldenSon API
 
-FastAPI backend application for GoldenSon.
+FastAPI backend for GoldenSon's local workspace, retrieval, managed Ollama, and
+approval-gated agent.
 
 ## Development
 
 ```bash
 uv sync
+uv run alembic upgrade head
 uv run uvicorn goldenson_api.main:app --app-dir src --reload
 ```
 
-The API health endpoint is available at `/api/health`.
+The `--app-dir src` option is required when the package is not installed in editable
+mode. The API health endpoint is available at `/api/health`; OpenAPI documentation
+is available at `/docs`.
 
 ## Database
 
@@ -30,3 +34,17 @@ Seed development data:
 ```bash
 uv run python -m goldenson_api.scripts.seed
 ```
+
+## Checks
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy .
+uv run pytest
+```
+
+Agent runs and tool calls are persisted in SQLite. READ tools execute directly;
+WRITE and DESTRUCTIVE tools require explicit approval and resume the persisted run
+after the decision. Tool inputs are validated and agent access remains restricted
+to workspace-scoped services.

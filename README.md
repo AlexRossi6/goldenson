@@ -1,15 +1,70 @@
 # GoldenSon
 
-Monorepo foundation for a local AI knowledge workspace.
+GoldenSon is an open-source, fully local AI knowledge workspace. It combines a
+document editor, local files, workspace retrieval, and an approval-gated AI agent
+without requiring a cloud account or sending workspace data to a cloud provider.
 
-This repository currently contains only development and tooling setup.
-No product features are implemented yet.
+The project is an active MVP. The core workspace and local agent are implemented;
+the broader direction is described in [docs/vision.md](docs/vision.md).
+
+## What works today
+
+- Local workspaces with nested pages and block-based editing
+- Paragraph, heading, checklist, code, quote, and divider blocks
+- Local file uploads and page attachments
+- Keyword retrieval across pages, blocks, and file metadata
+- Managed local AI through Ollama with an `LLMProvider` abstraction
+- Streaming assistant responses with retrieved source references
+- Validated agent tools for search, reading, structured queries, pages, tasks, and files
+- Mandatory approval for every WRITE and DESTRUCTIVE agent action
+- Persistent agent runs that pause for approval and resume the same reasoning loop
+- Reconnect, cancellation, execution limits, and a sanitized audit trail
+- Immediate UI refresh after approved agent mutations through TanStack Query
+- Optimistic concurrency for mutable pages and blocks
+
+All workspace data, SQLite records, files, retrieval, conversations, and inference
+stay on the user's machine by default. GoldenSon does not silently fall back to a
+cloud model and does not include telemetry.
+
+## Vision
+
+GoldenSon aims to become a personal knowledge system that AI can understand,
+analyze, and safely operate on, rather than a notes application with a chatbot
+attached. The long-term direction includes semantic and hybrid retrieval,
+versioned embeddings, richer relationships, proactive insights, advanced agents,
+and explicit opt-in integrations.
+
+Those items are direction, not current functionality. See
+[docs/vision.md](docs/vision.md) for the full roadmap.
+
+## Architecture
+
+```text
+React + TypeScript + Vite
+	  |
+       FastAPI
+	  |
+services / repositories / providers
+	  |
+ SQLite + local filesystem + Ollama
+```
+
+- **Frontend:** React, TypeScript, Vite, TanStack Query, Zustand
+- **Backend:** Python 3.12+, FastAPI, Pydantic, SQLAlchemy, Alembic, SQLite
+- **Local AI:** Ollama through an OpenAI-compatible provider interface
+- **Tooling:** pnpm, uv, Ruff, mypy, pytest, Vitest, Oxlint
+
+The agent never receives unrestricted shell, SQL, HTTP, or filesystem access.
+Tool arguments are validated, filesystem access is workspace-scoped, database
+queries are structured, and all mutations require explicit approval.
 
 ## Repository layout
 
-- `apps/api` - FastAPI backend (Python 3.12+, uv, Ruff, mypy, pytest)
-- `apps/web` - React + TypeScript + Vite frontend (pnpm, TanStack Query, Zustand)
-- `docs` - product vision and design documents
+```text
+apps/api/   FastAPI backend, migrations, and backend tests
+apps/web/   React application and frontend tests
+docs/       Product vision and design documents
+```
 
 ## Prerequisites
 
@@ -17,54 +72,86 @@ No product features are implemented yet.
 - [uv](https://docs.astral.sh/uv/)
 - Node.js 20+
 - [pnpm](https://pnpm.io/)
+- Ollama, or macOS for GoldenSon's managed Ollama installation flow
 
-## Run backend
+## Run locally
+
+Install dependencies and prepare the database:
 
 ```bash
 cd apps/api
 uv sync
+uv run alembic upgrade head
+```
+
+Start the API from `apps/api`:
+
+```bash
 uv run uvicorn goldenson_api.main:app --app-dir src --reload --host 127.0.0.1 --port 8000
 ```
 
-Health endpoint:
+The `--app-dir src` option is required because the backend uses a `src/` layout.
+The API health endpoint is `http://127.0.0.1:8000/api/health` and interactive API
+documentation is available at `http://127.0.0.1:8000/docs`.
 
-- `GET http://127.0.0.1:8000/api/health`
+In another terminal, start the frontend:
 
-## Local agent
+```bash
+cd apps/web
+pnpm install
+pnpm dev
+```
 
-GoldenSon detects and starts Ollama on the local machine, then manages model downloads and
-selection from the **Models** dialog. On macOS, if Ollama is missing, choose **Install Ollama**
-to download the official signed application into GoldenSon's private runtime directory. No model
-name, inference endpoint, system-wide installation, or administrator access is required.
+Open the URL printed by Vite, normally `http://127.0.0.1:5173`. The development
+server proxies `/api` to the API on port `8000`.
 
-The optional runtime setting is:
+Development data is optional:
+
+```bash
+cd apps/api
+uv run python -m goldenson_api.scripts.seed
+```
+
+## Local AI
+
+GoldenSon detects a loopback Ollama runtime and manages supported model downloads
+and selection from the Local AI panel. On macOS, GoldenSon can install the official
+signed Ollama application into its private runtime directory. It does not install
+models automatically during project setup.
+
+Relevant defaults are documented in [.env.example](.env.example):
 
 ```bash
 GOLDENSON_OLLAMA_BASE_URL=http://127.0.0.1:11434
 GOLDENSON_OLLAMA_RUNTIME_ROOT=~/.goldenson/runtime
+GOLDENSON_AGENT_MAX_TOOL_CALLS=8
+GOLDENSON_AGENT_MAX_RUN_SECONDS=60
+GOLDENSON_AGENT_PROVIDER_TIMEOUT_SECONDS=45
+GOLDENSON_AGENT_TOOL_TIMEOUT_SECONDS=10
 ```
 
-The endpoint is restricted to loopback. GoldenSon downloads only models from its supported local
-catalog and never sends workspace data to a cloud provider or falls back to one.
+The Ollama endpoint must resolve to loopback. Provider requests explicitly disable
+model reasoning where supported (`think: false`, `reasoning_effort: none`).
 
-## Run frontend
+## Agent lifecycle
 
-```bash
-cd apps/web
-pnpm install --store-dir ~/Library/pnpm/store/v11
-pnpm dev
+```text
+request -> retrieval -> local model -> proposed tool call
+	-> approval -> execution -> resumed reasoning -> result
 ```
 
-The Vite dev server proxies `/api/*` requests to `http://127.0.0.1:8000`.
+READ tools execute without approval. WRITE and DESTRUCTIVE tools pause the persisted
+run until the user approves or rejects the proposal. Approved mutations immediately
+invalidate the relevant frontend queries, so page, block, and file views update
+without a browser reload.
 
-## Verify frontend to backend
+Straightforward commands such as `Create a page called Research` are parsed into a
+validated proposal immediately, while still using the same approval, audit,
+execution, and resumption path.
 
-1. Start backend and frontend.
-2. Open the frontend URL shown by Vite.
-3. Click **Check backend health**.
-4. Confirm the status card shows `ok` from `/api/health`.
+## Quality checks
 
-## Backend checks
+Backend:
 
 ```bash
 cd apps/api
@@ -74,23 +161,22 @@ uv run mypy .
 uv run pytest
 ```
 
-## Migrations and seed data
-
-```bash
-cd apps/api
-uv run alembic upgrade head
-uv run python -m goldenson_api.scripts.seed
-```
-
-## Frontend checks
+Frontend:
 
 ```bash
 cd apps/web
 pnpm lint
 pnpm typecheck
+pnpm test
 pnpm build
 ```
 
-## CI
+CI runs these checks for pushes and pull requests through
+`.github/workflows/ci.yml`.
 
-A GitHub Actions workflow is available at `.github/workflows/ci.yml` and runs backend and frontend checks on pull requests and pushes to `main`.
+## Project status
+
+GoldenSon is under active development and is not yet packaged as a desktop
+application. Current work is focused on making the local knowledge workspace and
+its controlled agent dependable before expanding into semantic retrieval,
+background workflows, integrations, or synchronization.
