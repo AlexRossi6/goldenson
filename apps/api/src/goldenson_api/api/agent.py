@@ -124,8 +124,11 @@ async def reconnect_agent_run(
     )
 
 
-@router.post("/agent/runs/{run_id}/cancel", summary="Cancel a running agent request")
-async def cancel_run(run_id: UUID, session: DbSession) -> dict[str, object]:
-    if not await cancel_persisted_agent_run(session, str(run_id)):
+@router.post(
+    "/workspaces/{workspace_id}/agent/runs/{run_id}/cancel",
+    summary="Cancel a running agent request",
+)
+async def cancel_run(workspace_id: UUID, run_id: UUID, session: DbSession) -> dict[str, object]:
+    if not await cancel_persisted_agent_run(session, str(run_id), str(workspace_id)):
         raise NotFoundError("running agent request not found")
     return {"status": "cancelling", "run_id": str(run_id)}

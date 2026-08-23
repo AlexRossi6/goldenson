@@ -1,3 +1,9 @@
+## Local semantic indexing
+
+Semantic indexing uses Ollama's local `/api/embed` endpoint. It is disabled until
+`GOLDENSON_EMBEDDING_MODEL` is explicitly configured; GoldenSon never downloads an
+embedding model or falls back to a cloud provider. Install the chosen embedding
+model in Ollama first, then set the environment variable before starting the API.
 # GoldenSon API
 
 FastAPI backend for GoldenSon's local workspace, retrieval, managed Ollama, and

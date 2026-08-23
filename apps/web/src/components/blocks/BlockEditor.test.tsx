@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -61,7 +61,7 @@ describe('BlockEditor', () => {
     )
 
     expect(screen.getByRole('textbox', { name: 'Heading content' })).toHaveTextContent('Hello')
-    expect(screen.getByRole('textbox', { name: 'Paragraph line 1' })).toHaveTextContent('Hello')
+    expect(screen.getByRole('textbox', { name: 'Paragraph content' })).toHaveTextContent('Hello')
     expect(screen.queryByText('Heading')).not.toBeInTheDocument()
     expect(screen.queryByText('Paragraph')).not.toBeInTheDocument()
     expect(screen.getByText('Review notes')).toBeInTheDocument()
@@ -97,7 +97,7 @@ describe('BlockEditor', () => {
     )
 
     expect(screen.queryByRole('button', { name: 'Edit paragraph' })).not.toBeInTheDocument()
-    const paragraphInput = screen.getByRole('textbox', { name: 'Paragraph line 1' })
+    const paragraphInput = screen.getByRole('textbox', { name: 'Paragraph content' })
     await user.click(paragraphInput)
     await user.clear(paragraphInput)
     await user.type(paragraphInput, 'Updated draft')
@@ -124,9 +124,81 @@ describe('BlockEditor', () => {
       />,
     )
 
-    const paragraph = screen.getByRole('textbox', { name: 'Paragraph line 1' })
+    const paragraph = screen.getByRole('textbox', { name: 'Paragraph content' })
     expect(paragraph).toBeEmptyDOMElement()
     expect(paragraph).toHaveAttribute('data-placeholder', 'Start writing...')
+  })
+
+  it('inserts a line break in the same paragraph with Shift+Enter', async () => {
+    const user = userEvent.setup()
+    const onCreateBlock = vi.fn().mockResolvedValue(makeBlock({ id: 'next', page_id: 'p1', type: 'paragraph', position: 1, content: { text: '' } }))
+    const onUpdateBlock = vi.fn().mockResolvedValue(undefined)
+    render(
+      <BlockEditor
+        blocks={[makeBlock({ id: 'paragraph', page_id: 'p1', type: 'paragraph', content: { text: 'FirstSecond' } })]}
+        onCreateBlock={onCreateBlock}
+        onUpdateBlock={onUpdateBlock}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    const paragraph = screen.getByRole('textbox', { name: 'Paragraph content' })
+    await user.click(paragraph)
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.setStart(paragraph.firstChild as Text, 5)
+    range.collapse(true)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    fireEvent.keyDown(paragraph, { key: 'Enter', shiftKey: true })
+    const caretRange = document.createRange()
+    caretRange.selectNodeContents(paragraph)
+    caretRange.setEnd(
+      window.getSelection()?.anchorNode as Node,
+      window.getSelection()?.anchorOffset ?? 0,
+    )
+    expect(caretRange.toString().length).toBe(6)
+    fireEvent.blur(paragraph)
+
+    expect(onUpdateBlock).toHaveBeenCalledWith('paragraph', {
+      version: 1,
+      content: { text: 'First\nSecond' },
+    })
+    expect(screen.getAllByRole('listitem')).toHaveLength(1)
+    expect(paragraph.querySelector('br')).not.toBeNull()
+    expect(onCreateBlock).not.toHaveBeenCalled()
+  })
+
+  it('finishes the paragraph and creates exactly one new block with Enter', async () => {
+    const onCreateBlock = vi.fn().mockResolvedValue(makeBlock({ id: 'next', page_id: 'p1', type: 'paragraph', position: 1, content: { text: 'Second' } }))
+    const onUpdateBlock = vi.fn().mockResolvedValue(undefined)
+    render(
+      <BlockEditor
+        blocks={[makeBlock({ id: 'paragraph', page_id: 'p1', type: 'paragraph', content: { text: 'FirstSecond' } })]}
+        onCreateBlock={onCreateBlock}
+        onUpdateBlock={onUpdateBlock}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    const paragraph = screen.getByRole('textbox', { name: 'Paragraph content' })
+    const range = document.createRange()
+    range.setStart(paragraph.firstChild as Text, 5)
+    range.collapse(true)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+    fireEvent.keyDown(paragraph, { key: 'Enter' })
+
+    await waitFor(() => expect(onCreateBlock).toHaveBeenCalledTimes(1))
+    expect(onUpdateBlock).toHaveBeenCalledWith('paragraph', {
+      version: 1,
+      content: { text: 'First' },
+    })
+    expect(onCreateBlock).toHaveBeenCalledWith({
+      type: 'paragraph',
+      position: 1,
+      content: { text: 'Second' },
+    })
   })
 
   it('renders Markdown headings live on the same editable surface and persists the source syntax', async () => {
@@ -141,7 +213,7 @@ describe('BlockEditor', () => {
       />,
     )
 
-    const paragraph = screen.getByRole('textbox', { name: 'Paragraph line 1' })
+    const paragraph = screen.getByRole('textbox', { name: 'Paragraph content' })
     await user.click(paragraph)
     await user.type(paragraph, '## Test')
 

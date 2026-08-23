@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import math
 import re
-from collections import Counter
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -10,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from goldenson_api.services.block_service import BlockService
 from goldenson_api.services.file_service import FileService
+from goldenson_api.services.knowledge_service import KnowledgeService
 from goldenson_api.services.page_service import PageService
 
 _TOKEN_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]+", re.IGNORECASE)
@@ -30,17 +29,24 @@ class RetrievalResult(BaseModel):
     sources: list[RetrievedSource]
 
 
-def _tokens(value: str) -> Counter[str]:
-    return Counter(token.lower() for token in _TOKEN_PATTERN.findall(value))
+_SEMANTIC_WEIGHT = 0.55
+_KEYWORD_WEIGHT = 0.45
+_TITLE_BONUS = 0.25
+_SOURCE_BONUS = {"page": 0.05, "block": 0.02, "file": 0.0}
 
 
-def _score(query: Counter[str], document: Counter[str]) -> float:
-    if not query or not document:
+def _keyword_score(query: str, title: str, text: str) -> float:
+    query_tokens = {token.lower() for token in _TOKEN_PATTERN.findall(query)}
+    document_tokens = {token.lower() for token in _TOKEN_PATTERN.findall(f"{title} {text}")}
+    if not query_tokens or not document_tokens:
         return 0.0
-    overlap = sum(query[token] * document[token] for token in query)
-    query_norm = math.sqrt(sum(value * value for value in query.values()))
-    document_norm = math.sqrt(sum(value * value for value in document.values()))
-    return overlap / (query_norm * document_norm) if overlap else 0.0
+    coverage = len(query_tokens & document_tokens) / len(query_tokens)
+    normalized_query = " ".join(query.lower().split())
+    normalized_text = " ".join(f"{title} {text}".lower().split())
+    phrase_bonus = 0.5 if normalized_query and normalized_query in normalized_text else 0.0
+    title_tokens = {token.lower() for token in _TOKEN_PATTERN.findall(title)}
+    title_bonus = 0.35 if query_tokens <= title_tokens else 0.0
+    return min(1.0, coverage + phrase_bonus + title_bonus)
 
 
 def _block_text(content: dict[str, object]) -> str:
@@ -62,56 +68,93 @@ class WorkspaceRetrievalService:
         self._pages = PageService(session)
         self._blocks = BlockService(session)
         self._files = FileService(session)
+        self._knowledge = KnowledgeService(session)
 
     async def search(self, workspace_id: str, query: str, limit: int = 6) -> RetrievalResult:
-        query_tokens = _tokens(query)
-        candidates: list[RetrievedSource] = []
+        if not query.strip() or limit <= 0:
+            return RetrievalResult(context="", sources=[])
+
+        candidates: dict[tuple[str, str | None, str | None], RetrievedSource] = {}
         pages = await self._pages.list_pages(workspace_id)
+        semantic_results = await self._knowledge.semantic_search(
+            workspace_id, query, limit=max(limit * 3, 6)
+        )
+        semantic_scores: dict[str, float] = {}
+        semantic_block_scores: dict[tuple[str, str], float] = {}
+        semantic_snippets: dict[str, str] = {}
+        for chunk, score in semantic_results:
+            semantic_scores[chunk.page_id] = max(semantic_scores.get(chunk.page_id, 0.0), score)
+            semantic_snippets.setdefault(chunk.page_id, chunk.text)
+            if chunk.block_id is not None:
+                key = (chunk.page_id, chunk.block_id)
+                semantic_block_scores[key] = max(semantic_block_scores.get(key, 0.0), score)
 
         for page in pages:
             blocks = await self._blocks.list_blocks(page.id)
             page_body = "\n".join(_block_text(block.content) for block in blocks)
-            page_score = _score(query_tokens, _tokens(f"{page.title}\n{page_body}"))
+            keyword_score = _keyword_score(query, page.title, page_body)
+            semantic_score = semantic_scores.get(page.id, 0.0)
+            page_score = (
+                semantic_score * _SEMANTIC_WEIGHT
+                + keyword_score * _KEYWORD_WEIGHT
+                + (_TITLE_BONUS if keyword_score and query.lower() in page.title.lower() else 0.0)
+                + (_SOURCE_BONUS["page"] if semantic_score or keyword_score else 0.0)
+            )
             if page_score > 0:
-                candidates.append(
-                    RetrievedSource(
-                        kind="page",
-                        title=page.title,
-                        snippet=page_body[:500] or page.title,
-                        page_id=page.id,
-                        score=page_score,
-                    )
+                source = RetrievedSource(
+                    kind="page",
+                    title=page.title,
+                    snippet=semantic_snippets.get(page.id, page_body)[:500] or page.title,
+                    page_id=page.id,
+                    score=page_score,
                 )
+                candidates[("page", page.id, None)] = source
             for block in blocks:
                 text = _block_text(block.content)
-                block_score = _score(query_tokens, _tokens(f"{page.title}\n{text}"))
+                block_keyword_score = _keyword_score(query, page.title, text)
+                block_semantic_score = semantic_block_scores.get((page.id, block.id), 0.0)
+                block_score = (
+                    block_semantic_score * _SEMANTIC_WEIGHT
+                    + block_keyword_score * _KEYWORD_WEIGHT
+                    + (
+                        _SOURCE_BONUS["block"]
+                        if block_semantic_score or block_keyword_score
+                        else 0.0
+                    )
+                )
                 if text and block_score > 0:
-                    candidates.append(
-                        RetrievedSource(
-                            kind="block",
-                            title=page.title,
-                            snippet=text[:500],
-                            page_id=page.id,
-                            block_id=block.id,
-                            score=block_score,
-                        )
+                    candidates[("block", page.id, block.id)] = RetrievedSource(
+                        kind="block",
+                        title=page.title,
+                        snippet=text[:500],
+                        page_id=page.id,
+                        block_id=block.id,
+                        score=block_score,
                     )
 
         for file_metadata in await self._files.list_workspace_files(workspace_id):
-            file_score = _score(query_tokens, _tokens(file_metadata.name))
+            file_score = _keyword_score(query, file_metadata.name, "")
             if file_score > 0:
-                candidates.append(
-                    RetrievedSource(
-                        kind="file",
-                        title=file_metadata.name,
-                        snippet=file_metadata.name,
-                        page_id=file_metadata.page_id,
-                        file_id=file_metadata.id,
-                        score=file_score,
-                    )
+                candidates[("file", file_metadata.page_id, file_metadata.id)] = RetrievedSource(
+                    kind="file",
+                    title=file_metadata.name,
+                    snippet=file_metadata.name,
+                    page_id=file_metadata.page_id,
+                    file_id=file_metadata.id,
+                    score=file_score * _KEYWORD_WEIGHT + _SOURCE_BONUS["file"],
                 )
 
-        sources = sorted(candidates, key=lambda source: source.score, reverse=True)[:limit]
+        sources = sorted(
+            candidates.values(),
+            key=lambda source: (
+                -source.score,
+                source.kind,
+                source.title.casefold(),
+                source.snippet,
+                source.page_id or "",
+                source.block_id or source.file_id or "",
+            ),
+        )[:limit]
         context_parts = [
             f"SOURCE {index + 1}: {source.title}\n{source.snippet}"
             for index, source in enumerate(sources)

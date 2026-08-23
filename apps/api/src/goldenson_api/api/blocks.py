@@ -1,10 +1,11 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from goldenson_api.api.dependencies import get_db_session
+from goldenson_api.api.knowledge_tasks import queue_page_index
 from goldenson_api.api.transaction import run_mutation
 from goldenson_api.schemas.block import (
     BlockCreate,
@@ -14,6 +15,7 @@ from goldenson_api.schemas.block import (
     BlockUpdate,
 )
 from goldenson_api.services.block_service import BlockService
+from goldenson_api.services.page_service import PageService
 
 router = APIRouter(tags=["Blocks"])
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]
@@ -39,6 +41,7 @@ async def create_block(
     page_id: UUID,
     payload: BlockCreateRequest,
     session: DbSession,
+    background_tasks: BackgroundTasks,
 ) -> BlockRead:
     service = BlockService(session)
 
@@ -53,7 +56,10 @@ async def create_block(
         )
         return BlockRead.model_validate(block)
 
-    return await run_mutation(session, action)
+    result = await run_mutation(session, action)
+    page = await PageService(session).get_page(result.page_id)
+    queue_page_index(background_tasks, result.page_id, None if page is None else page.version)
+    return result
 
 
 @router.patch("/blocks/{block_id}", response_model=BlockRead, summary="Update block")
@@ -61,6 +67,7 @@ async def update_block(
     block_id: UUID,
     payload: BlockUpdate,
     session: DbSession,
+    background_tasks: BackgroundTasks,
 ) -> BlockRead:
     service = BlockService(session)
 
@@ -68,7 +75,10 @@ async def update_block(
         block = await service.update_block(str(block_id), payload)
         return BlockRead.model_validate(block)
 
-    return await run_mutation(session, action)
+    result = await run_mutation(session, action)
+    page = await PageService(session).get_page(result.page_id)
+    queue_page_index(background_tasks, result.page_id, None if page is None else page.version)
+    return result
 
 
 @router.delete(
@@ -76,10 +86,19 @@ async def update_block(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete block",
 )
-async def delete_block(block_id: UUID, session: DbSession) -> None:
+async def delete_block(
+    block_id: UUID,
+    session: DbSession,
+    background_tasks: BackgroundTasks,
+) -> None:
     service = BlockService(session)
+    block = await service.get_block(str(block_id))
+    page_id = None if block is None else block.page_id
 
     async def action() -> None:
         await service.delete_block(str(block_id))
 
     await run_mutation(session, action)
+    if page_id is not None:
+        page = await PageService(session).get_page(page_id)
+        queue_page_index(background_tasks, page_id, None if page is None else page.version)

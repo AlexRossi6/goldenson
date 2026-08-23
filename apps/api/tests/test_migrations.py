@@ -21,4 +21,14 @@ def test_fresh_database_is_created_from_migrations(tmp_path: Path) -> None:
     inspector = inspect(sync_engine)
     tables = set(inspector.get_table_names())
 
-    assert {"workspaces", "pages", "blocks", "files"}.issubset(tables)
+    assert {
+        "workspaces",
+        "pages",
+        "blocks",
+        "files",
+        "knowledge_index_config",
+        "page_knowledge",
+        "knowledge_chunks",
+        "agent_tool_calls",
+    }.issubset(tables)
+    assert "generation" in {column["name"] for column in inspector.get_columns("page_knowledge")}

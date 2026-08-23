@@ -44,6 +44,7 @@ class AgentToolCall(Base):
     tool_name: Mapped[str] = mapped_column(String(100), nullable=False)
     permission: Mapped[str] = mapped_column(String(20), nullable=False)
     arguments: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    execution_arguments: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     approval_state: Mapped[str] = mapped_column(String(20), nullable=False)
     result: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     result_summary: Mapped[str | None] = mapped_column(String(500), nullable=True)

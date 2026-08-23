@@ -12,7 +12,7 @@ type BlockPayload = {
 
 type BlockEditorProps = {
   blocks: Block[]
-  onCreateBlock: (payload: { type: string; position: number; content: Record<string, unknown> }) => Promise<void>
+  onCreateBlock: (payload: { type: string; position: number; content: Record<string, unknown> }) => Promise<Block>
   onUpdateBlock: (blockId: string, payload: BlockPayload) => Promise<void>
   onDeleteBlock: (block: Block) => Promise<void>
 }
@@ -31,6 +31,12 @@ export function BlockEditor({ blocks, onCreateBlock, onUpdateBlock, onDeleteBloc
     setCreating(false)
   }
 
+  const createParagraphAfter = (content: Record<string, unknown>) => onCreateBlock({
+    type: 'paragraph',
+    position: Math.max(-1, ...sortedBlocks.map((block) => block.position)) + 1,
+    content,
+  })
+
   return (
     <section>
       <div className="new-block-card">
@@ -45,7 +51,7 @@ export function BlockEditor({ blocks, onCreateBlock, onUpdateBlock, onDeleteBloc
       </div>
       {sortedBlocks.length === 0 ? <p className="empty-copy">A blank page is ready for your ideas.</p> : <ul className="block-list" aria-label="Page content">
         {sortedBlocks.map((block) => (
-          <InlineEditableBlock key={block.id} block={block} onUpdateBlock={onUpdateBlock} onDeleteBlock={onDeleteBlock} />
+          <InlineEditableBlock key={block.id} block={block} onCreateBlockAfter={createParagraphAfter} onUpdateBlock={onUpdateBlock} onDeleteBlock={onDeleteBlock} />
         ))}
       </ul>}
     </section>

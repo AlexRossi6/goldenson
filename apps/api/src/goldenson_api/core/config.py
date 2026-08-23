@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     max_upload_size: int = 100 * 1024 * 1024
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_runtime_root: Path = Path("~/.goldenson/runtime").expanduser()
+    embedding_model: str = ""
+    embedding_provider_version: str = "ollama-api-v1"
     agent_max_tool_calls: int = 8
     agent_max_run_seconds: float = 60.0
     agent_provider_timeout_seconds: float = 45.0

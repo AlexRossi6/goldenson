@@ -80,6 +80,7 @@ class AgentAuditRepository:
         permission: str,
         arguments: dict[str, object],
         approval_state: str,
+        execution_arguments: dict[str, object] | None = None,
     ) -> AgentToolCall:
         tool_call = AgentToolCall(
             run_id=run_id,
@@ -87,6 +88,7 @@ class AgentAuditRepository:
             tool_name=tool_name,
             permission=permission,
             arguments=arguments,
+            execution_arguments=execution_arguments,
             approval_state=approval_state,
         )
         self._session.add(tool_call)

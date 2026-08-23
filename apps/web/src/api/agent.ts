@@ -117,6 +117,6 @@ export async function reconnectAgentRun(
   await consumeAgentEvents(response, onEvent)
 }
 
-export async function cancelAgentRun(runId: string): Promise<void> {
-  await apiRequest(`/agent/runs/${runId}/cancel`, { method: 'POST' })
+export async function cancelAgentRun(workspaceId: string, runId: string): Promise<void> {
+  await apiRequest(`/workspaces/${workspaceId}/agent/runs/${runId}/cancel`, { method: 'POST' })
 }

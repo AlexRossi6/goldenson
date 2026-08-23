@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -14,6 +15,11 @@ def create_engine_and_sessionmaker(
     database_url: str,
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     engine = create_async_engine(database_url, future=True)
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def enable_foreign_keys(dbapi_connection: object, _connection_record: object) -> None:
+        dbapi_connection.run_async(lambda connection: connection.execute("PRAGMA foreign_keys=ON"))  # type: ignore[attr-defined]
+
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     return engine, session_factory
 

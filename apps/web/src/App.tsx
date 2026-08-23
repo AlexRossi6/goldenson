@@ -5,6 +5,7 @@ import { createBlock, deleteBlock, listBlocks, updateBlock } from './api/blocks'
 import { deleteFile, listFiles, listPageFiles, uploadFile } from './api/files'
 import { createPage, deletePage, getPage, listPages, updatePage } from './api/pages'
 import { createWorkspace, listWorkspaces } from './api/workspaces'
+import { getPageKnowledge, getRelatedPages, reindexPage } from './api/knowledge'
 import type { AgentWorkspaceChange } from './api/agent'
 import { AssistantPanel } from './components/assistant/AssistantPanel'
 import { PageEditor } from './components/pages/PageEditor'
@@ -74,6 +75,31 @@ function App() {
     enabled: Boolean(selectedPageId),
   })
 
+  const knowledgeQuery = useQuery({
+    queryKey: ['page-knowledge', selectedPageId],
+    queryFn: () => getPageKnowledge(selectedPageId ?? ''),
+    enabled: Boolean(selectedPageId),
+    refetchInterval: (query) => ['pending', 'indexing'].includes(query.state.data?.status ?? '') ? 1000 : false,
+  })
+
+  const relatedQuery = useQuery({
+    queryKey: ['related-pages', selectedPageId],
+    queryFn: () => getRelatedPages(selectedPageId ?? ''),
+    enabled: Boolean(selectedPageId),
+    retry: false,
+    refetchInterval: () => ['pending', 'indexing'].includes(knowledgeQuery.data?.status ?? '') ? 1000 : false,
+  })
+
+  const reindexMutation = useMutation({
+    mutationFn: reindexPage,
+    onSuccess: async (_, pageId) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['page-knowledge', pageId] }),
+        queryClient.invalidateQueries({ queryKey: ['related-pages', pageId] }),
+      ])
+    },
+  })
+
   const createWorkspaceMutation = useMutation({
     mutationFn: createWorkspace,
     onSuccess: async () => {
@@ -116,8 +142,11 @@ function App() {
       updatePage(pageId, payload),
     onSuccess: async (updatedPage) => {
       setErrorMessage(null)
+      queryClient.setQueryData(['page-knowledge', updatedPage.id], { status: 'pending', concepts: [] })
       await queryClient.invalidateQueries({ queryKey: ['pages', updatedPage.workspace_id] })
       await queryClient.invalidateQueries({ queryKey: ['page', updatedPage.id] })
+      await queryClient.invalidateQueries({ queryKey: ['page-knowledge', updatedPage.id] })
+      await queryClient.invalidateQueries({ queryKey: ['related-pages', updatedPage.id] })
     },
     onError: async (error) => {
       if (error instanceof ApiClientError && error.code === 'CONCURRENCY_CONFLICT') {
@@ -156,8 +185,11 @@ function App() {
       payload: Parameters<typeof createBlock>[1]
     }) => createBlock(pageId, payload),
     onSuccess: async (createdBlock) => {
+      queryClient.setQueryData(['page-knowledge', createdBlock.page_id], { status: 'pending', concepts: [] })
       await queryClient.invalidateQueries({ queryKey: ['blocks', createdBlock.page_id] })
       await queryClient.invalidateQueries({ queryKey: ['page', createdBlock.page_id] })
+      await queryClient.invalidateQueries({ queryKey: ['page-knowledge', createdBlock.page_id] })
+      await queryClient.invalidateQueries({ queryKey: ['related-pages', createdBlock.page_id] })
       setErrorMessage(null)
     },
     onError: (error) => {
@@ -178,7 +210,10 @@ function App() {
       payload: Parameters<typeof updateBlock>[1]
     }) => updateBlock(blockId, payload),
     onSuccess: async (updatedBlock) => {
+      queryClient.setQueryData(['page-knowledge', updatedBlock.page_id], { status: 'pending', concepts: [] })
       await queryClient.invalidateQueries({ queryKey: ['blocks', updatedBlock.page_id] })
+      await queryClient.invalidateQueries({ queryKey: ['page-knowledge', updatedBlock.page_id] })
+      await queryClient.invalidateQueries({ queryKey: ['related-pages', updatedBlock.page_id] })
       setErrorMessage(null)
     },
     onError: async (error) => {
@@ -188,13 +223,18 @@ function App() {
         setErrorMessage('Failed to update block.')
       }
       await queryClient.invalidateQueries({ queryKey: ['blocks', selectedPageId] })
+      await queryClient.invalidateQueries({ queryKey: ['page-knowledge', selectedPageId] })
+      await queryClient.invalidateQueries({ queryKey: ['related-pages', selectedPageId] })
     },
   })
 
   const deleteBlockMutation = useMutation({
     mutationFn: deleteBlock,
     onSuccess: async () => {
+      if (selectedPageId) queryClient.setQueryData(['page-knowledge', selectedPageId], { status: 'pending', concepts: [] })
       await queryClient.invalidateQueries({ queryKey: ['blocks', selectedPageId] })
+      await queryClient.invalidateQueries({ queryKey: ['page-knowledge', selectedPageId] })
+      await queryClient.invalidateQueries({ queryKey: ['related-pages', selectedPageId] })
       setErrorMessage(null)
     },
     onError: (error) => {
@@ -290,9 +330,9 @@ function App() {
     content: Record<string, unknown>
   }) => {
     if (!selectedPageId) {
-      return
+      throw new Error('Cannot create a block without a selected page.')
     }
-    await createBlockMutation.mutateAsync({ pageId: selectedPageId, payload })
+    return await createBlockMutation.mutateAsync({ pageId: selectedPageId, payload })
   }
 
   const updateExistingBlock = async (
@@ -503,6 +543,12 @@ function App() {
             onRequestDelete={() => requestDeletePage(selectedPage)}
             onUploadAttachment={addFile}
             onDeleteAttachment={requestDeleteFile}
+            relatedPages={relatedQuery.data?.items ?? []}
+            relatedLoading={relatedQuery.isLoading}
+            relatedError={relatedQuery.isError}
+            knowledge={knowledgeQuery.data}
+            onRetryKnowledge={() => reindexMutation.mutate(selectedPage.id)}
+            onSelectPage={setSelectedPageId}
           />
         )}
 

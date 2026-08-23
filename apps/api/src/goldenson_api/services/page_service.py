@@ -113,7 +113,7 @@ class PageService:
         await self._block_repository.delete_for_pages(list(descendants))
         await self._file_repository.detach_from_pages(list(descendants))
         deleted = await self._repository.delete_subtree(list(descendants))
-        if deleted != len(descendants):
+        if deleted < 1:
             raise NotFoundError("page not found")
 
     async def get_by_title_and_parent(

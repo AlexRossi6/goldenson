@@ -81,8 +81,13 @@ def cancel_agent_run(run_id: str) -> bool:
     return True
 
 
-async def cancel_persisted_agent_run(session: AsyncSession, run_id: str) -> bool:
+async def cancel_persisted_agent_run(
+    session: AsyncSession, run_id: str, workspace_id: str | None = None
+) -> bool:
     repository = AgentAuditRepository(session)
+    run = await repository.get_run(run_id)
+    if run is None or (workspace_id is not None and run.workspace_id != workspace_id):
+        return False
     transitioned = await repository.transition_run(
         run_id,
         {"running", "resuming", "waiting_for_approval"},
@@ -94,9 +99,7 @@ async def cancel_persisted_agent_run(session: AsyncSession, run_id: str) -> bool
     event = _cancel_events.get(run_id)
     if event is not None:
         event.set()
-    run = await repository.get_run(run_id)
-    if run is not None:
-        run.completed_at = run.updated_at
+    run.completed_at = run.updated_at
     await session.commit()
     return True
 
@@ -235,7 +238,9 @@ class AgentService:
             yield {"type": "done", "status": "timed_out"}
             return
 
-        arguments = validate_tool_arguments(tool_call.tool_name, tool_call.arguments)
+        validate_tool_arguments(tool_call.tool_name, tool_call.arguments)
+        execution_arguments = tool_call.execution_arguments or tool_call.arguments
+        arguments = validate_tool_arguments(tool_call.tool_name, execution_arguments)
         permission = tool_permission(tool_call.tool_name)
         if permission == ToolPermission.READ:
             raise BadRequestError("READ tools do not require approval")
@@ -524,6 +529,7 @@ class AgentService:
                     permission.value,
                     audit_arguments,
                     "not_required" if permission == ToolPermission.READ else "pending",
+                    arguments.model_dump(mode="json"),
                 )
                 await self._session.commit()
 

@@ -82,8 +82,10 @@ describe('AssistantPanel', () => {
     await user.type(question, 'What am I working on?')
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
-    expect(await screen.findByText('Searching your workspace...')).toBeInTheDocument()
+    expect(screen.getByText('What am I working on?')).toBeInTheDocument()
     expect(screen.getByText('You are comparing Ollama and llama.cpp.')).toBeInTheDocument()
+    expect(screen.getByText('Page · Ollama notes')).toBeInTheDocument()
+    expect(question).toHaveValue('')
     await user.click(screen.getByRole('button', { name: 'Local AI' }))
     expect(onSelectPage).toHaveBeenCalledWith('page-1')
   })
@@ -138,7 +140,7 @@ describe('AssistantPanel', () => {
       expect.any(Function),
       expect.any(AbortSignal),
     )
-    expect(await screen.findByText('Approved, continuing...')).toBeInTheDocument()
+    expect(screen.getByText('Create a draft')).toBeInTheDocument()
     expect(screen.getByText('Draft created.')).toBeInTheDocument()
     expect(onWorkspaceChanged).toHaveBeenCalledWith({
       type: 'workspace_changed',
@@ -165,7 +167,7 @@ describe('AssistantPanel', () => {
     await user.click(await screen.findByRole('button', { name: 'Cancel' }))
 
     await waitFor(() => expect(capturedSignal?.aborted).toBe(true))
-    expect(apiMocks.cancelAgentRun).toHaveBeenCalledWith('run-1')
+    expect(apiMocks.cancelAgentRun).toHaveBeenCalledWith('workspace-1', 'run-1')
     expect(screen.getByText('Cancelled.')).toBeInTheDocument()
   })
 

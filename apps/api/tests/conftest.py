@@ -7,11 +7,12 @@ from pathlib import Path
 import pytest
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from alembic import command
 from goldenson_api.api.dependencies import get_db_session
 from goldenson_api.core.config import get_settings
+from goldenson_api.db.session import create_engine_and_sessionmaker
 from goldenson_api.main import create_app
 
 
@@ -36,8 +37,7 @@ def migrated_db_url(db_url: str) -> str:
 async def session_factory(
     migrated_db_url: str,
 ) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine(migrated_db_url, future=True)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
+    engine, factory = create_engine_and_sessionmaker(migrated_db_url)
 
     yield factory
 
@@ -58,8 +58,7 @@ def api_client(
 ) -> Iterator[TestClient]:
     monkeypatch.setenv("GOLDENSON_STORAGE_ROOT", str(tmp_path / "files"))
     get_settings.cache_clear()
-    engine = create_async_engine(migrated_db_url, future=True)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
+    engine, factory = create_engine_and_sessionmaker(migrated_db_url)
 
     app = create_app()
 

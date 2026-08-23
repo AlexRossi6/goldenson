@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 
 import type { Block } from '../../types/api'
 
@@ -9,6 +9,7 @@ type BlockPayload = {
 
 type InlineEditableBlockProps = {
   block: Block
+  onCreateBlockAfter: (content: Record<string, unknown>) => Promise<Block>
   onUpdateBlock: (blockId: string, payload: BlockPayload) => Promise<void>
   onDeleteBlock: (block: Block) => Promise<void>
 }
@@ -42,8 +43,14 @@ function generateId(): string {
   return `item-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+function serializeEditable(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return (node.textContent ?? '').replaceAll('\u200b', '')
+  if (node instanceof HTMLBRElement) return '\n'
+  return Array.from(node.childNodes, serializeEditable).join('')
+}
+
 function editableText(element: HTMLElement): string {
-  return (element.textContent ?? '').replace(/\n$/, '')
+  return serializeEditable(element)
 }
 
 function getCaretOffset(element: HTMLElement): number {
@@ -52,7 +59,7 @@ function getCaretOffset(element: HTMLElement): number {
   const range = selection.getRangeAt(0).cloneRange()
   range.selectNodeContents(element)
   range.setEnd(selection.anchorNode as Node, selection.anchorOffset)
-  return range.toString().length
+  return serializeEditable(range.cloneContents()).length
 }
 
 function focusAt(element: HTMLElement | null, offset: number): void {
@@ -67,7 +74,7 @@ function focusAt(element: HTMLElement | null, offset: number): void {
   selection?.addRange(range)
 }
 
-export function InlineEditableBlock({ block, onUpdateBlock, onDeleteBlock }: InlineEditableBlockProps) {
+export function InlineEditableBlock({ block, onCreateBlockAfter, onUpdateBlock, onDeleteBlock }: InlineEditableBlockProps) {
   const initialText = block.type === 'code'
     ? typeof block.content.code === 'string' ? block.content.code : ''
     : typeof block.content.text === 'string' ? block.content.text : ''
@@ -76,15 +83,23 @@ export function InlineEditableBlock({ block, onUpdateBlock, onDeleteBlock }: Inl
   const [busy, setBusy] = useState(false)
   const markdownLineRefs = useRef<Array<HTMLDivElement | null>>([])
   const todoItemRefs = useRef<Array<HTMLDivElement | null>>([])
+  const paragraphRef = useRef<HTMLDivElement | null>(null)
+  const handledEnterRef = useRef(false)
   const textRef = useRef(initialText)
   const todoRef = useRef(todoContent)
 
-  const persist = (content: Record<string, unknown>) => {
+  const save = async (content: Record<string, unknown>) => {
     if (JSON.stringify(content) === JSON.stringify(block.content)) return
     setBusy(true)
-    void onUpdateBlock(block.id, { version: block.version, content })
-      .catch(() => undefined)
-      .finally(() => setBusy(false))
+    try {
+      await onUpdateBlock(block.id, { version: block.version, content })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const persist = (content: Record<string, unknown>) => {
+    void save(content).catch(() => undefined)
   }
 
   const updateText = (lines: string[], shouldRender = true) => {
@@ -112,6 +127,95 @@ export function InlineEditableBlock({ block, onUpdateBlock, onDeleteBlock }: Inl
     }
   }
 
+  const handleParagraphInput = (element: HTMLDivElement) => {
+    const selection = window.getSelection()
+    const anchor = selection?.anchorNode
+    if (anchor?.nodeType === Node.TEXT_NODE && anchor.textContent?.includes('\u200b')) {
+      const offset = selection?.anchorOffset ?? 0
+      const removedBeforeCaret = anchor.textContent.slice(0, offset).split('\u200b').length - 1
+      anchor.textContent = anchor.textContent.replaceAll('\u200b', '')
+      const range = document.createRange()
+      range.setStart(anchor, Math.max(0, offset - removedBeforeCaret))
+      range.collapse(true)
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+    }
+    const visibleText = editableText(element)
+    const current = parseMarkdownLine(textRef.current)
+    const typedHeading = parseMarkdownLine(visibleText)
+    if (typedHeading.level) {
+      textRef.current = visibleText
+      element.textContent = typedHeading.content
+      setText(visibleText)
+      window.setTimeout(() => focusAt(paragraphRef.current, typedHeading.content.length), 0)
+    } else {
+      textRef.current = makeMarkdownLine(current.level, visibleText)
+    }
+  }
+
+  const insertParagraphLineBreak = () => {
+    const element = paragraphRef.current
+    if (!element) return
+    const caret = getCaretOffset(element)
+    const current = textRef.current
+    textRef.current = `${current.slice(0, caret)}\n${current.slice(caret)}`
+
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0 || !element.contains(selection.anchorNode)) {
+      element.textContent = textRef.current
+      focusAt(element, caret + 1)
+      return
+    }
+    const range = selection.getRangeAt(0)
+    range.deleteContents()
+    const newline = document.createElement('br')
+    range.insertNode(newline)
+    const caretNode = document.createTextNode('\u200b')
+    newline.after(caretNode)
+    range.setStart(caretNode, 1)
+    range.collapse(true)
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }
+
+  const finishParagraph = () => {
+    const caret = getCaretOffset(paragraphRef.current as HTMLDivElement)
+    const current = textRef.current
+    const finished = current.slice(0, caret)
+    const remainder = current.slice(caret)
+    updateText([finished])
+    void save({ ...block.content, text: finished })
+      .then(() => onCreateBlockAfter({ text: remainder }))
+      .then((created) => {
+        window.setTimeout(() => {
+          const next = document.querySelector<HTMLElement>(`[data-block-id="${created.id}"] [contenteditable="true"]`)
+          focusAt(next, 0)
+        }, 0)
+      })
+      .catch(() => undefined)
+  }
+
+  const handleParagraphEnter = (shiftKey: boolean) => {
+    if (shiftKey) insertParagraphLineBreak()
+    else finishParagraph()
+  }
+
+  const handleParagraphBeforeInput = (event: FormEvent<HTMLDivElement>) => {
+    const inputType = (event.nativeEvent as InputEvent).inputType
+    if (inputType !== 'insertLineBreak' && inputType !== 'insertParagraph') return
+    event.preventDefault()
+    if (handledEnterRef.current) return
+    handleParagraphEnter(inputType === 'insertLineBreak')
+  }
+
+  const handleParagraphKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    handledEnterRef.current = true
+    window.setTimeout(() => { handledEnterRef.current = false }, 0)
+    handleParagraphEnter(event.shiftKey)
+  }
+
   const handleMarkdownKeyDown = (event: KeyboardEvent<HTMLDivElement>, index: number) => {
     const lines = textRef.current.split('\n')
     const parsed = parseMarkdownLine(lines[index] ?? '')
@@ -119,6 +223,12 @@ export function InlineEditableBlock({ block, onUpdateBlock, onDeleteBlock }: Inl
 
     if (event.key === 'Enter') {
       event.preventDefault()
+      if (event.shiftKey && block.type === 'paragraph') {
+        lines[index] = `${parsed.content.slice(0, caret)}\n${parsed.content.slice(caret)}`
+        updateText(lines)
+        window.setTimeout(() => focusAt(markdownLineRefs.current[index], caret + 1), 0)
+        return
+      }
       lines.splice(index, 1, makeMarkdownLine(parsed.level, parsed.content.slice(0, caret)), parsed.content.slice(caret))
       updateText(lines)
       window.setTimeout(() => focusAt(markdownLineRefs.current[index + 1], 0), 0)
@@ -161,8 +271,10 @@ export function InlineEditableBlock({ block, onUpdateBlock, onDeleteBlock }: Inl
     }
   }
 
+  const paragraph = parseMarkdownLine(text)
+
   return (
-    <li className={`block-card block-${block.type}`}>
+    <li className={`block-card block-${block.type}`} data-block-id={block.id}>
       <div className="block-context-actions">
         <button type="button" className="block-delete text-button danger-link" aria-label={`Delete ${block.type} block`} onClick={() => void onDeleteBlock(block)} disabled={busy}>Delete</button>
       </div>
@@ -239,10 +351,29 @@ export function InlineEditableBlock({ block, onUpdateBlock, onDeleteBlock }: Inl
               {text}
             </code>
           </pre>
+        ) : block.type === 'paragraph' ? (
+          <div className="inline-document" aria-label="Paragraph content">
+            <div
+              ref={paragraphRef}
+              className={`inline-text markdown-level-${paragraph.level}`}
+              contentEditable={!busy}
+              suppressContentEditableWarning
+              role="textbox"
+              aria-label="Paragraph content"
+              aria-multiline="true"
+              data-placeholder="Start writing..."
+              onInput={(event) => handleParagraphInput(event.currentTarget)}
+              onBeforeInput={handleParagraphBeforeInput}
+              onKeyDown={handleParagraphKeyDown}
+              onBlur={() => persist({ ...block.content, text: textRef.current })}
+            >
+              {paragraph.content}
+            </div>
+          </div>
         ) : (
           <div className="inline-document" aria-label={block.type === 'paragraph' ? 'Paragraph content' : 'Heading content'}>
             {text.split('\n').map((line, index) => {
-              const parsed = block.type === 'paragraph' ? parseMarkdownLine(line) : { level: 2, content: line }
+              const parsed = { level: 2, content: line }
               return (
                 <div
                   key={index}

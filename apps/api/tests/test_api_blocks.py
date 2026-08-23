@@ -1,4 +1,9 @@
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from goldenson_api.api import knowledge_tasks
+from goldenson_api.services.knowledge_service import KnowledgeService
 
 
 def _create_workspace(client: TestClient, name: str) -> str:
@@ -105,3 +110,59 @@ def test_block_concurrency_conflict(api_client: TestClient) -> None:
     list_response = api_client.get(f"/api/pages/{page_id}/blocks")
     assert list_response.status_code == 200
     assert list_response.json()["items"][0]["content"] == {"text": "v2"}
+
+
+def test_page_and_block_crud_survive_failed_indexing(
+    api_client: TestClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_indexing(
+        _service: KnowledgeService,
+        _page_id: str,
+        _expected_page_version: int | None = None,
+    ) -> None:
+        raise RuntimeError("embedding unavailable")
+
+    monkeypatch.setattr(knowledge_tasks, "SessionLocal", session_factory)
+    monkeypatch.setattr(KnowledgeService, "index_page", fail_indexing)
+
+    workspace_id = _create_workspace(api_client, "Failed Indexing CRUD")
+    page_response = api_client.post(
+        f"/api/workspaces/{workspace_id}/pages",
+        json={"title": "Still saved", "parent_page_id": None, "position": 0},
+    )
+    assert page_response.status_code == 201
+    page = page_response.json()
+    page_id = page["id"]
+    assert api_client.get(f"/api/pages/{page_id}").status_code == 200
+    assert api_client.get(f"/api/pages/{page_id}/knowledge").json()["status"] == "failed"
+
+    block_response = api_client.post(
+        f"/api/pages/{page_id}/blocks",
+        json={"type": "paragraph", "position": 0, "content": {"text": "Draft"}},
+    )
+    assert block_response.status_code == 201
+    block = block_response.json()
+
+    update_block_response = api_client.patch(
+        f"/api/blocks/{block['id']}",
+        json={"content": {"text": "Updated"}, "version": block["version"]},
+    )
+    assert update_block_response.status_code == 200
+    assert update_block_response.json()["content"] == {"text": "Updated"}
+
+    delete_block_response = api_client.delete(f"/api/blocks/{block['id']}")
+    assert delete_block_response.status_code == 204
+
+    update_page_response = api_client.patch(
+        f"/api/pages/{page_id}",
+        json={"title": "Updated page", "version": page["version"]},
+    )
+    assert update_page_response.status_code == 200
+    assert update_page_response.json()["title"] == "Updated page"
+    assert api_client.get(f"/api/pages/{page_id}/knowledge").json()["status"] == "failed"
+
+    delete_page_response = api_client.delete(f"/api/pages/{page_id}")
+    assert delete_page_response.status_code == 204
+    assert api_client.get(f"/api/pages/{page_id}").status_code == 404

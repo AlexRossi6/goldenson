@@ -17,11 +17,15 @@ type AssistantPanelProps = {
   onWorkspaceChanged?: (change: AgentWorkspaceChange) => void
 }
 
+type ConversationMessage = {
+  role: 'user' | 'assistant'
+  content: string
+  sources?: AgentSource[]
+}
+
 export function AssistantPanel({ workspaceId, onSelectPage, onWorkspaceChanged }: AssistantPanelProps) {
   const [question, setQuestion] = useState('')
-  const [answer, setAnswer] = useState('')
-  const [activity, setActivity] = useState<string[]>([])
-  const [sources, setSources] = useState<AgentSource[]>([])
+  const [conversation, setConversation] = useState<ConversationMessage[]>([])
   const [proposal, setProposal] = useState<AgentProposal | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
@@ -34,16 +38,23 @@ export function AssistantPanel({ workspaceId, onSelectPage, onWorkspaceChanged }
   const handleEvent = (event: AgentEvent) => {
     if (event.type === 'run') setRunId(event.run_id)
     if (event.type === 'activity') {
-      setActivity((current) => [...current, event.message])
       setProgressMessage(event.message.replace(/\.{3}$/, ''))
     }
     if (event.type === 'sources') {
-      setSources(event.sources)
       setProgressMessage('Thinking')
+      setConversation((current) => {
+        const last = current[current.length - 1]
+        if (!last || last.role !== 'assistant') return current
+        return [...current.slice(0, -1), { ...last, sources: event.sources }]
+      })
     }
     if (event.type === 'text') {
       setProgressMessage(null)
-      setAnswer((current) => current + event.content)
+      setConversation((current) => {
+        const last = current[current.length - 1]
+        if (!last || last.role !== 'assistant') return current
+        return [...current.slice(0, -1), { ...last, content: last.content + event.content }]
+      })
     }
     if (event.type === 'proposal') {
       setProgressMessage(null)
@@ -67,9 +78,8 @@ export function AssistantPanel({ workspaceId, onSelectPage, onWorkspaceChanged }
 
     const controller = new AbortController()
     controllerRef.current = controller
-    setAnswer('')
-    setActivity([])
-    setSources([])
+    setQuestion('')
+    setConversation((current) => [...current, { role: 'user', content: message }, { role: 'assistant', content: '' }])
     setProposal(null)
     setError(null)
     setRunId(null)
@@ -90,10 +100,14 @@ export function AssistantPanel({ workspaceId, onSelectPage, onWorkspaceChanged }
 
   const cancel = () => {
     controllerRef.current?.abort()
-    if (runId) void cancelAgentRun(runId).catch(() => undefined)
+    if (runId && workspaceId) void cancelAgentRun(workspaceId, runId).catch(() => undefined)
     setRunning(false)
     setProgressMessage(null)
-    setActivity((current) => [...current, 'Cancelled.'])
+    setConversation((current) => {
+      const last = current[current.length - 1]
+      if (!last || last.role !== 'assistant' || last.content) return current
+      return [...current.slice(0, -1), { ...last, content: 'Cancelled.' }]
+    })
   }
 
   const decide = async (approved: boolean) => {
@@ -148,13 +162,27 @@ export function AssistantPanel({ workspaceId, onSelectPage, onWorkspaceChanged }
         {running && progressMessage && (
           <p className="assistant-progress" role="status">{progressMessage}</p>
         )}
-        {activity.length > 0 && (
-          <ol className="assistant-activity" aria-label="Agent activity">
-            {activity.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
-          </ol>
-        )}
-
-        {answer && <div className="assistant-answer">{answer}</div>}
+        {conversation.map((message, index) => (
+          <article className={`assistant-message assistant-message-${message.role}`} key={`${message.role}-${index}`}>
+            <span className="assistant-message-label">{message.role === 'user' ? 'You' : 'Assistant'}</span>
+            {message.content && <p>{message.content}</p>}
+            {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
+              <section className="assistant-sources" aria-label="Sources">
+                <h3>Sources</h3>
+                <ul>
+                  {message.sources.map((source) => (
+                    <li key={`${source.kind}-${source.block_id ?? source.file_id ?? source.page_id}`}>
+                      <button type="button" className="source-link" disabled={!source.page_id} onClick={() => source.page_id && onSelectPage(source.page_id)}>
+                        {source.title}
+                      </button>
+                      <span>{source.kind === 'block' ? 'Block' : source.kind === 'file' ? 'File' : 'Page'} · {source.snippet}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </article>
+        ))}
         {error && <p className="assistant-error" role="alert">{error}</p>}
 
         {proposal && (
@@ -170,26 +198,6 @@ export function AssistantPanel({ workspaceId, onSelectPage, onWorkspaceChanged }
           </section>
         )}
 
-        {sources.length > 0 && (
-          <section className="assistant-sources" aria-label="Sources">
-            <h3>Sources</h3>
-            <ul>
-              {sources.map((source) => (
-                <li key={`${source.kind}-${source.block_id ?? source.file_id ?? source.page_id}`}>
-                  <button
-                    type="button"
-                    className="source-link"
-                    disabled={!source.page_id}
-                    onClick={() => source.page_id && onSelectPage(source.page_id)}
-                  >
-                    {source.title}
-                  </button>
-                  <span>{source.kind}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
       </div>
 
       <form className="assistant-compose" onSubmit={(event) => void submit(event)}>

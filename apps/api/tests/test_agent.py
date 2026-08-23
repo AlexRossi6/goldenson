@@ -879,6 +879,11 @@ async def test_pending_tool_arguments_are_sanitized_in_audit(session: AsyncSessi
     assert tool_call is not None
     assert "private-value" not in json.dumps(tool_call.arguments)
     assert "[REDACTED]" in json.dumps(tool_call.arguments)
+    assert tool_call.execution_arguments == {
+        "name": "notes.txt",
+        "content": "token=private-value",
+        "page_id": None,
+    }
 
 
 def test_agent_sse_streams_text_sources_and_completion(api_client: TestClient) -> None:

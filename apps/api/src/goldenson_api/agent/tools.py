@@ -137,7 +137,6 @@ class AgentToolExecutor:
                     position=create_page_args.position,
                 )
             )
-            await self._session.commit()
             return PageRead.model_validate(page).model_dump(mode="json")
         if name == "update_page":
             update_page_args = cast(UpdatePageArgs, arguments)
@@ -147,7 +146,6 @@ class AgentToolExecutor:
                 PageUpdate(title=update_page_args.title, version=update_page_args.version),
                 set_parent=False,
             )
-            await self._session.commit()
             return PageRead.model_validate(page).model_dump(mode="json")
         if name == "create_task":
             create_task_args = cast(CreateTaskArgs, arguments)
@@ -169,7 +167,6 @@ class AgentToolExecutor:
                     },
                 )
             )
-            await self._session.commit()
             return BlockRead.model_validate(block).model_dump(mode="json")
         if name == "move_page":
             move_page_args = cast(MovePageArgs, arguments)
@@ -183,7 +180,6 @@ class AgentToolExecutor:
                 ),
                 set_parent=True,
             )
-            await self._session.commit()
             return PageRead.model_validate(page).model_dump(mode="json")
         if name == "create_file":
             create_file_args = cast(CreateFileArgs, arguments)
@@ -193,13 +189,11 @@ class AgentToolExecutor:
                 create_file_args.content,
                 str(create_file_args.page_id) if create_file_args.page_id else None,
             )
-            await self._session.commit()
             return FileMetadataRead.model_validate(file_metadata).model_dump(mode="json")
         if name == "delete_page":
             delete_page_args = cast(DeletePageArgs, arguments)
             await self._require_workspace_page(str(delete_page_args.page_id))
             await self._pages.delete_page(str(delete_page_args.page_id))
-            await self._session.commit()
             return {"deleted": True, "page_id": str(delete_page_args.page_id)}
         raise BadRequestError("unknown agent tool")
 

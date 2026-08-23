@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import type { Block, FileMetadata, Page } from '../../types/api'
+import type { PageKnowledge, RelatedPage } from '../../api/knowledge'
 import { BlockEditor } from '../blocks/BlockEditor'
 import { FileArea } from '../files/FileArea'
 import { InlineNotice } from '../ui/InlineNotice'
@@ -24,7 +25,7 @@ type PageEditorProps = {
     type: string
     position: number
     content: Record<string, unknown>
-  }) => Promise<void>
+  }) => Promise<Block>
   onUpdateBlock: (
     blockId: string,
     payload: {
@@ -37,6 +38,12 @@ type PageEditorProps = {
   onDeleteBlock: (block: Block) => void | Promise<void>
   onUploadAttachment: (file: File) => Promise<void>
   onDeleteAttachment: (file: FileMetadata) => void
+  relatedPages?: RelatedPage[]
+  relatedLoading?: boolean
+  relatedError?: boolean
+  knowledge?: PageKnowledge
+  onRetryKnowledge?: () => void
+  onSelectPage?: (pageId: string) => void
 }
 
 export function PageEditor({
@@ -56,6 +63,12 @@ export function PageEditor({
   onRequestDelete,
   onUploadAttachment,
   onDeleteAttachment,
+  relatedPages = [],
+  relatedLoading = false,
+  relatedError = false,
+  knowledge,
+  onRetryKnowledge,
+  onSelectPage,
 }: PageEditorProps) {
   const [titleDraft, setTitleDraft] = useState(page.title)
   const [titleStatus, setTitleStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
@@ -99,6 +112,40 @@ export function PageEditor({
       </header>
 
       {errorMessage && <InlineNotice tone="error" message={errorMessage} />}
+
+      {(knowledge?.status === 'ready' || knowledge?.status === 'pending' || knowledge?.status === 'indexing' || knowledge?.status === 'failed' || knowledge?.status === 'stale' || relatedPages.length > 0 || relatedLoading || relatedError) && (
+        <aside className="knowledge-strip" aria-label="Page knowledge">
+          <div>
+            <h3>Related</h3>
+            {knowledge?.status === 'pending' && <span className="knowledge-status">Indexing...</span>}
+            {knowledge?.status === 'indexing' && <span className="knowledge-status">Indexing...</span>}
+            {knowledge?.status === 'ready' && <span className="knowledge-status">Ready</span>}
+            {relatedLoading && <span className="knowledge-status">Finding related pages...</span>}
+            {relatedError && <span className="knowledge-status">Related pages unavailable</span>}
+            {(knowledge?.status === 'failed' || knowledge?.status === 'stale') && (
+              <button type="button" className="knowledge-retry" onClick={onRetryKnowledge}>Retry analysis</button>
+            )}
+            {knowledge?.status === 'ready' && knowledge.concepts.length > 0 && (
+              <div className="concept-list" aria-label="Concepts">
+                {knowledge.concepts.map((concept) => <span className="concept-pill" key={concept}>{concept}</span>)}
+              </div>
+            )}
+          </div>
+          {relatedPages.length > 0 && (
+            <ul className="related-list">
+              {relatedPages.map((related) => (
+                <li key={related.page_id}>
+                  <button type="button" onClick={() => onSelectPage?.(related.page_id)}>{related.title}</button>
+                  <span>{related.reason}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {!relatedLoading && !relatedError && knowledge?.status === 'ready' && relatedPages.length === 0 && (
+            <span className="knowledge-status">No related pages yet.</span>
+          )}
+        </aside>
+      )}
 
       <BlockEditor
         blocks={blocks}

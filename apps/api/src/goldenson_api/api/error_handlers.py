@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -13,6 +15,8 @@ from goldenson_api.services.errors import (
     NotFoundError,
     StorageError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _error_payload(
@@ -94,7 +98,13 @@ def register_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(SQLAlchemyError)
-    async def sqlalchemy_handler(_: Request, __: SQLAlchemyError) -> JSONResponse:
+    async def sqlalchemy_handler(request: Request, exc: SQLAlchemyError) -> JSONResponse:
+        logger.exception(
+            "database operation failed for %s %s",
+            request.method,
+            request.url.path,
+            exc_info=exc,
+        )
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content=_error_payload("BAD_REQUEST", "Database operation failed."),
