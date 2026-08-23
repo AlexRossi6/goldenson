@@ -112,3 +112,37 @@ async def test_equal_scores_are_deterministic() -> None:
     result = await service.search("w1", "same", limit=5)
 
     assert [source.page_id for source in result.sources] == ["p1", "p2"]
+
+
+@pytest.mark.asyncio
+async def test_searchable_text_file_matches_extracted_content() -> None:
+    file = SimpleNamespace(
+        id="f1",
+        name="notes.md",
+        page_id=None,
+        search_text="local inference benchmark results",
+    )
+    service = service_with([], {}, [file])
+
+    result = await service.search("w1", "benchmark results")
+
+    assert len(result.sources) == 1
+    assert result.sources[0].file_id == "f1"
+    assert result.sources[0].snippet == "local inference benchmark results"
+
+
+@pytest.mark.asyncio
+async def test_unparsed_file_remains_searchable_by_filename_metadata() -> None:
+    file = SimpleNamespace(
+        id="f1",
+        name="Alex_Rossi_FlowCV_Resume_2026-08-15.pdf",
+        page_id=None,
+        search_text=None,
+    )
+    service = service_with([], {}, [file])
+
+    result = await service.search("w1", "FlowCV Resume")
+
+    assert len(result.sources) == 1
+    assert result.sources[0].file_id == "f1"
+    assert result.sources[0].snippet == file.name

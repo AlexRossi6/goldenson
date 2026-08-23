@@ -55,18 +55,18 @@ describe('AssistantPanel', () => {
 
   it('shows streamed activity, answer text, and navigable sources', async () => {
     const user = userEvent.setup()
-    const onSelectPage = vi.fn()
+    const onOpenSource = vi.fn()
     apiMocks.streamAgentRun.mockImplementation(async (_workspaceId, _message, onEvent) => {
       onEvent({ type: 'run', run_id: 'run-1' })
       onEvent({ type: 'activity', message: 'Searching your workspace...' })
       onEvent({
         type: 'sources',
         sources: [{
-          kind: 'page',
+          kind: 'block',
           title: 'Local AI',
           snippet: 'Ollama notes',
           page_id: 'page-1',
-          block_id: null,
+          block_id: 'block-1',
           file_id: null,
           score: 1,
         }],
@@ -75,7 +75,7 @@ describe('AssistantPanel', () => {
       onEvent({ type: 'text', content: 'Ollama and llama.cpp.' })
       onEvent({ type: 'done', status: 'completed' })
     })
-    render(<AssistantPanel workspaceId="workspace-1" onSelectPage={onSelectPage} />)
+    render(<AssistantPanel workspaceId="workspace-1" onOpenSource={onOpenSource} />)
 
     const question = screen.getByLabelText('Ask the workspace assistant')
     await waitFor(() => expect(question).toBeEnabled())
@@ -84,10 +84,13 @@ describe('AssistantPanel', () => {
 
     expect(screen.getByText('What am I working on?')).toBeInTheDocument()
     expect(screen.getByText('You are comparing Ollama and llama.cpp.')).toBeInTheDocument()
-    expect(screen.getByText('Page · Ollama notes')).toBeInTheDocument()
+    expect(screen.getByText('In page · Ollama notes')).toBeInTheDocument()
     expect(question).toHaveValue('')
     await user.click(screen.getByRole('button', { name: 'Local AI' }))
-    expect(onSelectPage).toHaveBeenCalledWith('page-1')
+    expect(onOpenSource).toHaveBeenCalledWith(expect.objectContaining({
+      page_id: 'page-1',
+      block_id: 'block-1',
+    }))
   })
 
   it('shows a proposed change and sends approval explicitly', async () => {
@@ -121,7 +124,7 @@ describe('AssistantPanel', () => {
     render(
       <AssistantPanel
         workspaceId="workspace-1"
-        onSelectPage={vi.fn()}
+        onOpenSource={vi.fn()}
         onWorkspaceChanged={onWorkspaceChanged}
       />,
     )
@@ -158,7 +161,7 @@ describe('AssistantPanel', () => {
       return new Promise<void>(() => undefined)
     })
     apiMocks.cancelAgentRun.mockResolvedValue(undefined)
-    render(<AssistantPanel workspaceId="workspace-1" onSelectPage={vi.fn()} />)
+    render(<AssistantPanel workspaceId="workspace-1" onOpenSource={vi.fn()} />)
 
     const question = screen.getByLabelText('Ask the workspace assistant')
     await waitFor(() => expect(question).toBeEnabled())
@@ -179,7 +182,7 @@ describe('AssistantPanel', () => {
       onEvent({ type: 'activity', message: 'Searching your workspace...' })
       return new Promise<void>(() => undefined)
     })
-    render(<AssistantPanel workspaceId="workspace-1" onSelectPage={vi.fn()} />)
+    render(<AssistantPanel workspaceId="workspace-1" onOpenSource={vi.fn()} />)
 
     const question = screen.getByLabelText('Ask the workspace assistant')
     await waitFor(() => expect(question).toBeEnabled())
@@ -193,7 +196,7 @@ describe('AssistantPanel', () => {
 
   it('collapses and expands the responsive assistant content', async () => {
     const user = userEvent.setup()
-    render(<AssistantPanel workspaceId="workspace-1" onSelectPage={vi.fn()} />)
+    render(<AssistantPanel workspaceId="workspace-1" onOpenSource={vi.fn()} />)
 
     const collapse = screen.getByRole('button', { name: 'Collapse assistant' })
     expect(collapse).toHaveAttribute('aria-expanded', 'true')

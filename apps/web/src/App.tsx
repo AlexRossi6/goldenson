@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { createBlock, deleteBlock, listBlocks, updateBlock } from './api/blocks'
-import { deleteFile, listFiles, listPageFiles, uploadFile } from './api/files'
+import { deleteFile, getFileDownloadUrl, listFiles, listPageFiles, retryFileIndex, uploadFile } from './api/files'
 import { createPage, deletePage, getPage, listPages, updatePage } from './api/pages'
-import { createWorkspace, listWorkspaces } from './api/workspaces'
+import { createWorkspace, getWorkspaceIndexHealth, listWorkspaces, retryFailedWorkspaceIndexing } from './api/workspaces'
 import { getPageKnowledge, getRelatedPages, reindexPage } from './api/knowledge'
 import type { AgentWorkspaceChange } from './api/agent'
 import { AssistantPanel } from './components/assistant/AssistantPanel'
@@ -13,10 +13,12 @@ import { MovePageDialog } from './components/pages/MovePageDialog'
 import { PageTree } from './components/sidebar/PageTree'
 import { FileArea } from './components/files/FileArea'
 import { NewPageForm } from './components/sidebar/NewPageForm'
+import { WorkspaceSearch } from './components/search/WorkspaceSearch'
+import { IndexHealth } from './components/search/IndexHealth'
 import { ConfirmDialog } from './components/ui/ConfirmDialog'
 import { InlineNotice } from './components/ui/InlineNotice'
 import { useUiStore } from './stores/ui'
-import { ApiClientError, type Block, type FileMetadata, type Page } from './types/api'
+import { ApiClientError, type Block, type FileMetadata, type Page, type RetrievedSource } from './types/api'
 
 function App() {
   const queryClient = useQueryClient()
@@ -24,6 +26,7 @@ function App() {
   const [pageDraftTitle, setPageDraftTitle] = useState('')
   const [pageDraftParentId, setPageDraftParentId] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [targetBlockId, setTargetBlockId] = useState<string | null>(null)
   const [moveDialogOpen, setMoveDialogOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{ kind: 'page' | 'block' | 'file'; page?: Page; block?: Block; file?: FileMetadata } | null>(null)
 
@@ -55,12 +58,28 @@ function App() {
     queryKey: ['files', workspaceId],
     queryFn: () => listFiles(workspaceId ?? ''),
     enabled: Boolean(workspaceId),
+    refetchInterval: (query) => query.state.data?.items.some(
+      (file) => file.index_status === 'pending' || file.index_status === 'indexing',
+    ) ? 1000 : false,
+  })
+
+  const indexHealthQuery = useQuery({
+    queryKey: ['index-health', workspaceId],
+    queryFn: () => getWorkspaceIndexHealth(workspaceId ?? ''),
+    enabled: Boolean(workspaceId),
+    refetchInterval: (query) => {
+      const health = query.state.data
+      return health && health.pages.indexing + health.files.indexing > 0 ? 1000 : false
+    },
   })
 
   const pageFilesQuery = useQuery({
     queryKey: ['page-files', selectedPageId],
     queryFn: () => listPageFiles(selectedPageId ?? ''),
     enabled: Boolean(selectedPageId),
+    refetchInterval: (query) => query.state.data?.items.some(
+      (file) => file.index_status === 'pending' || file.index_status === 'indexing',
+    ) ? 1000 : false,
   })
 
   const pageQuery = useQuery({
@@ -96,6 +115,30 @@ function App() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['page-knowledge', pageId] }),
         queryClient.invalidateQueries({ queryKey: ['related-pages', pageId] }),
+        queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] }),
+      ])
+    },
+  })
+
+  const retryFailedIndexingMutation = useMutation({
+    mutationFn: () => retryFailedWorkspaceIndexing(workspaceId ?? ''),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] }),
+        queryClient.invalidateQueries({ queryKey: ['files', workspaceId] }),
+        queryClient.invalidateQueries({ queryKey: ['page-files'] }),
+        queryClient.invalidateQueries({ queryKey: ['page-knowledge'] }),
+      ])
+    },
+  })
+
+  const retryFileIndexMutation = useMutation({
+    mutationFn: retryFileIndex,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['files', workspaceId] }),
+        queryClient.invalidateQueries({ queryKey: ['page-files'] }),
+        queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] }),
       ])
     },
   })
@@ -126,7 +169,10 @@ function App() {
         position,
       }),
     onSuccess: async (createdPage) => {
-      await queryClient.invalidateQueries({ queryKey: ['pages', createdPage.workspace_id] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['pages', createdPage.workspace_id] }),
+        queryClient.invalidateQueries({ queryKey: ['index-health', createdPage.workspace_id] }),
+      ])
       setSelectedPageId(createdPage.id)
       setPageExpanded(createdPage.id, true)
       setPageDraftTitle('')
@@ -147,6 +193,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['page', updatedPage.id] })
       await queryClient.invalidateQueries({ queryKey: ['page-knowledge', updatedPage.id] })
       await queryClient.invalidateQueries({ queryKey: ['related-pages', updatedPage.id] })
+      await queryClient.invalidateQueries({ queryKey: ['index-health', updatedPage.workspace_id] })
     },
     onError: async (error) => {
       if (error instanceof ApiClientError && error.code === 'CONCURRENCY_CONFLICT') {
@@ -164,6 +211,7 @@ function App() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['pages', workspaceId] })
       await queryClient.invalidateQueries({ queryKey: ['files', workspaceId] })
+      await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
       setSelectedPageId(null)
       setErrorMessage(null)
     },
@@ -190,6 +238,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['page', createdBlock.page_id] })
       await queryClient.invalidateQueries({ queryKey: ['page-knowledge', createdBlock.page_id] })
       await queryClient.invalidateQueries({ queryKey: ['related-pages', createdBlock.page_id] })
+      await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
       setErrorMessage(null)
     },
     onError: (error) => {
@@ -214,6 +263,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['blocks', updatedBlock.page_id] })
       await queryClient.invalidateQueries({ queryKey: ['page-knowledge', updatedBlock.page_id] })
       await queryClient.invalidateQueries({ queryKey: ['related-pages', updatedBlock.page_id] })
+      await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
       setErrorMessage(null)
     },
     onError: async (error) => {
@@ -225,6 +275,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['blocks', selectedPageId] })
       await queryClient.invalidateQueries({ queryKey: ['page-knowledge', selectedPageId] })
       await queryClient.invalidateQueries({ queryKey: ['related-pages', selectedPageId] })
+      await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
     },
   })
 
@@ -251,6 +302,7 @@ function App() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['files', workspaceId] })
       await queryClient.invalidateQueries({ queryKey: ['page-files', selectedPageId] })
+      await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
       setErrorMessage(null)
     },
     onError: (error) => setErrorMessage(error instanceof ApiClientError ? error.message : 'Could not add this file.'),
@@ -261,6 +313,7 @@ function App() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['files', workspaceId] })
       await queryClient.invalidateQueries({ queryKey: ['page-files', selectedPageId] })
+      await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
       setDeleteTarget(null)
       setErrorMessage(null)
     },
@@ -282,6 +335,15 @@ function App() {
       setSelectedPageId(pageList[0].id)
     }
   }, [pageList, selectedPageId, setSelectedPageId, workspaceId])
+
+  useEffect(() => {
+    if (!targetBlockId || blocksQuery.isLoading) return
+    const block = document.querySelector<HTMLElement>(`[data-block-id="${targetBlockId}"]`)
+    if (!block) return
+    block.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+    const timer = window.setTimeout(() => setTargetBlockId(null), 2400)
+    return () => window.clearTimeout(timer)
+  }, [blocksQuery.data, blocksQuery.isLoading, targetBlockId])
 
   const selectedPage = pageQuery.data ?? null
   const selectedBlocks = useMemo(() => blocksQuery.data?.items ?? [], [blocksQuery.data?.items])
@@ -370,6 +432,20 @@ function App() {
     if (!selectedPage) return
     await updateCurrentPage(selectedPage.id, { version: selectedPage.version, parent_page_id: parentPageId, position })
     setMoveDialogOpen(false)
+  }
+
+  const selectPage = (pageId: string) => {
+    setTargetBlockId(null)
+    setSelectedPageId(pageId)
+  }
+
+  const openSource = (source: RetrievedSource) => {
+    if (source.page_id) {
+      setTargetBlockId(source.block_id)
+      setSelectedPageId(source.page_id)
+      return
+    }
+    if (source.file_id) window.open(getFileDownloadUrl(source.file_id), '_blank', 'noopener,noreferrer')
   }
 
   const refreshAfterAgentMutation = async (change: AgentWorkspaceChange) => {
@@ -469,6 +545,13 @@ function App() {
 
         {sidebarOpen && (
           <>
+            <WorkspaceSearch workspaceId={workspace.id} onOpenSource={openSource} />
+            <IndexHealth
+              health={indexHealthQuery.data}
+              loading={indexHealthQuery.isLoading}
+              retrying={retryFailedIndexingMutation.isPending}
+              onRetryFailed={() => retryFailedIndexingMutation.mutate()}
+            />
             <NewPageForm
               pages={pageList}
               title={pageDraftTitle}
@@ -484,7 +567,7 @@ function App() {
               selectedPageId={selectedPageId}
               expandedPages={expandedPages}
               onToggleExpand={togglePageExpanded}
-              onSelectPage={setSelectedPageId}
+              onSelectPage={selectPage}
               onCreateChild={createChildPage}
               onDeletePage={requestDeletePage}
             />
@@ -495,6 +578,8 @@ function App() {
               uploading={false}
               errorMessage={filesQuery.isError ? 'Files could not be loaded.' : null}
               onDelete={requestDeleteFile}
+              onRetryIndex={(file) => retryFileIndexMutation.mutate(file.id)}
+              retryingFileId={retryFileIndexMutation.isPending ? retryFileIndexMutation.variables : null}
             />
           </>
         )}
@@ -530,6 +615,7 @@ function App() {
             page={selectedPage}
             blocks={selectedBlocks}
             blocksLoading={blocksQuery.isLoading}
+            highlightedBlockId={targetBlockId}
             attachments={pageFilesQuery.data?.items ?? []}
             attachmentsLoading={pageFilesQuery.isLoading}
             attachmentsUploading={uploadFileMutation.isPending}
@@ -544,20 +630,22 @@ function App() {
             onRequestDelete={() => requestDeletePage(selectedPage)}
             onUploadAttachment={addFile}
             onDeleteAttachment={requestDeleteFile}
+            onRetryAttachmentIndex={(file) => retryFileIndexMutation.mutate(file.id)}
+            retryingFileId={retryFileIndexMutation.isPending ? retryFileIndexMutation.variables : null}
             relatedPages={relatedQuery.data?.items ?? []}
             relatedLoading={relatedQuery.isLoading}
             relatedError={relatedQuery.isError}
             knowledge={knowledgeQuery.data}
             onRetryKnowledge={() => reindexMutation.mutate(selectedPage.id)}
             onRetryRelated={() => void relatedQuery.refetch()}
-            onSelectPage={setSelectedPageId}
+            onSelectPage={selectPage}
           />
         )}
 
       </main>
       <AssistantPanel
         workspaceId={workspace.id}
-        onSelectPage={setSelectedPageId}
+        onOpenSource={openSource}
         onWorkspaceChanged={(change) => void refreshAfterAgentMutation(change)}
       />
       {selectedPage && <MovePageDialog key={`${selectedPage.id}-${moveDialogOpen}`} page={selectedPage} pages={pageList} open={moveDialogOpen} busy={updatePageMutation.isPending} onCancel={() => setMoveDialogOpen(false)} onMove={moveCurrentPage} />}

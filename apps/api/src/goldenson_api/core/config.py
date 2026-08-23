@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     ollama_runtime_root: Path = Path("~/.goldenson/runtime").expanduser()
     embedding_model: str = ""
     embedding_provider_version: str = "ollama-api-v1"
+    knowledge_index_timeout_seconds: float = 90.0
     agent_max_tool_calls: int = 8
     agent_max_run_seconds: float = 60.0
     agent_provider_timeout_seconds: float = 45.0

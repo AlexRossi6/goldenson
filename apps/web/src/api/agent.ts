@@ -1,14 +1,7 @@
 import { apiRequest, apiUrl } from './client'
+import type { RetrievedSource } from '../types/api'
 
-export type AgentSource = {
-  kind: 'page' | 'block' | 'file'
-  title: string
-  snippet: string
-  page_id: string | null
-  block_id: string | null
-  file_id: string | null
-  score: number
-}
+export type AgentSource = RetrievedSource
 
 export type AgentProposal = {
   tool_call_id: string

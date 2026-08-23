@@ -81,6 +81,149 @@ body {
   color: var(--muted-ink);
 }
 
+.workspace-search {
+  display: grid;
+  gap: 0.65rem;
+  padding-block: 0.75rem;
+  border-block: 1px solid var(--line);
+}
+
+.search-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+}
+
+.search-form input {
+  min-width: 0;
+  min-height: 38px;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--ink);
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.search-form .button {
+  min-height: 38px;
+}
+
+.search-results,
+.search-state {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.search-results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.search-state,
+.search-state p {
+  margin: 0;
+  color: var(--muted-ink);
+  font-size: 0.8rem;
+}
+
+.search-state .text-button {
+  width: fit-content;
+  padding-left: 0;
+}
+
+.search-result-list {
+  display: grid;
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border-bottom: 1px solid var(--line);
+}
+
+.search-result {
+  display: grid;
+  gap: 0.18rem;
+  width: 100%;
+  padding: 0.65rem 0.2rem;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-result:hover,
+.search-result:focus-visible {
+  padding-inline: 0.45rem;
+  outline: none;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.search-result-meta {
+  color: var(--muted-ink);
+  font-family: 'DM Mono', 'Courier New', monospace;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+}
+
+.search-result-preview {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted-ink);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.index-health {
+  display: grid;
+  gap: 0.3rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.index-health-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.index-health-heading > span,
+.index-health-summary,
+.file-index-status {
+  color: var(--muted-ink);
+  font-family: 'DM Mono', 'Courier New', monospace;
+  font-size: 0.68rem;
+}
+
+.index-health-heading > span {
+  text-transform: uppercase;
+}
+
+.index-health.is-failed .index-health-heading > span,
+.index-health.is-stale .index-health-heading > span,
+.file-index-status.is-failed,
+.file-index-status.is-stale {
+  color: #b6341d;
+}
+
+.index-health-summary {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.index-health .text-button {
+  width: fit-content;
+  padding-left: 0;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -136,10 +279,21 @@ body {
 
 .file-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 0.35rem;
   align-items: center;
   font-size: 0.8rem;
+}
+
+.file-item-main {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.file-index-status {
+  line-height: 1.35;
+  white-space: normal;
 }
 
 .file-link {
@@ -180,7 +334,7 @@ textarea {
   font: inherit;
 }
 
-.knowledge-strip {
+.related-content {
   display: grid;
   gap: 0.75rem;
   margin: 1rem 0;
@@ -195,7 +349,7 @@ textarea {
   align-items: center;
 }
 
-.knowledge-strip h3 {
+.related-content h3 {
   margin: 0 0 0.45rem;
   font-size: 0.9rem;
 }
@@ -796,6 +950,23 @@ h1 {
   background: rgba(255, 255, 255, 0.48);
 }
 
+.block-card.is-highlighted {
+  background: #eaf2ff;
+  box-shadow: inset 3px 0 0 var(--lime);
+  animation: source-highlight 900ms ease-out;
+}
+
+@keyframes source-highlight {
+  from { background: #bfd4ff; }
+  to { background: #eaf2ff; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .block-card.is-highlighted {
+    animation: none;
+  }
+}
+
 .block-context-actions {
   position: absolute;
   top: 0.3rem;
@@ -1337,12 +1508,17 @@ h3 {
 
 @media (max-width: 900px) {
   .app-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .side-panel {
+    min-width: 0;
     border-right: 0;
     border-bottom: 1px solid var(--ink);
+  }
+
+  .main-panel {
+    min-width: 0;
   }
 
   .side-panel.is-collapsed {

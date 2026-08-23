@@ -68,6 +68,26 @@ def test_page_create_list_get_update_delete(api_client: TestClient) -> None:
     assert delete_response.status_code == 204
 
 
+def test_page_index_failure_does_not_block_page_crud(api_client: TestClient) -> None:
+    workspace_response = api_client.post("/api/workspaces", json={"name": "Index failure"})
+    workspace_id = workspace_response.json()["id"]
+    create_response = api_client.post(
+        f"/api/workspaces/{workspace_id}/pages",
+        json={"title": "Still editable", "parent_page_id": None, "position": 0},
+    )
+    assert create_response.status_code == 201
+    page = create_response.json()
+    assert api_client.get(f"/api/pages/{page['id']}/knowledge").json()["status"] == "failed"
+
+    update_response = api_client.patch(
+        f"/api/pages/{page['id']}",
+        json={"title": "Updated after failure", "version": page["version"]},
+    )
+
+    assert update_response.status_code == 200
+    assert update_response.json()["title"] == "Updated after failure"
+
+
 def test_invalid_parent_relationships(api_client: TestClient) -> None:
     workspace_id = _create_workspace(api_client, "Parent Validation")
     other_workspace_id = _create_workspace(api_client, "Other Workspace")

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import UploadFile
@@ -10,6 +11,17 @@ from goldenson_api.db.repositories.page_repository import PageRepository
 from goldenson_api.db.repositories.workspace_repository import WorkspaceRepository
 from goldenson_api.services.errors import BadRequestError, NotFoundError
 from goldenson_api.storage.local_storage import LocalStorage
+
+_TEXT_MIME_TYPES = {"application/json", "application/xml"}
+_TEXT_SUFFIXES = {".csv", ".json", ".log", ".md", ".markdown", ".txt", ".xml"}
+
+
+def supports_file_content_search(name: str, mime_type: str) -> bool:
+    return (
+        mime_type.casefold().startswith("text/")
+        or mime_type.casefold() in _TEXT_MIME_TYPES
+        or Path(name).suffix.casefold() in _TEXT_SUFFIXES
+    )
 
 
 class FileService:
@@ -39,6 +51,9 @@ class FileService:
                 raise BadRequestError("file page must belong to the same workspace")
 
         stored = await self._storage.store_upload(upload, workspace_id, self._max_upload_size)
+        supports_content_search = supports_file_content_search(
+            upload.filename or "untitled", upload.content_type or "application/octet-stream"
+        )
         try:
             return await self._repository.create(
                 workspace_id=workspace_id,
@@ -47,6 +62,9 @@ class FileService:
                 storage_key=stored.storage_key,
                 mime_type=upload.content_type or "application/octet-stream",
                 size=stored.size,
+                index_status="pending" if supports_content_search else "metadata_only",
+                content_hash=stored.sha256,
+                index_generation=1 if supports_content_search else 0,
             )
         except Exception:
             self._storage.delete_file(stored.storage_key)
@@ -78,6 +96,11 @@ class FileService:
                 storage_key=stored.storage_key,
                 mime_type="text/plain",
                 size=stored.size,
+                index_status="ready",
+                search_text=content,
+                content_hash=stored.sha256,
+                index_generation=1,
+                indexed_at=datetime.now(UTC),
             )
         except Exception:
             self._storage.delete_file(stored.storage_key)

@@ -105,8 +105,68 @@ async def test_failed_index_is_observable_without_partial_new_vectors(
     await session.commit()
 
     assert record.status == "failed"
-    assert record.error == "embedding failed"
+    assert record.error == "Content indexing could not be completed."
     assert await service.semantic_search(workspace_id, "local") == []
+
+
+async def test_retry_succeeds_after_transient_embedding_failure(
+    session: AsyncSession,
+) -> None:
+    workspace_id, page_id, _ = await make_page(session)
+    provider = FakeEmbeddingProvider(fail_on="local")
+    service = KnowledgeService(session, provider)
+
+    failed = await service.index_page(page_id)
+    assert failed.status == "failed"
+    provider.fail_on = None
+    recovered = await service.index_page(page_id)
+    await session.commit()
+
+    assert recovered.status == "ready"
+    assert await service.semantic_search(workspace_id, "local")
+
+
+async def test_failed_reindex_preserves_previous_valid_index(
+    session: AsyncSession,
+) -> None:
+    workspace_id, page_id, _ = await make_page(session)
+    first_provider = FakeEmbeddingProvider()
+    await KnowledgeService(session, first_provider).index_page(page_id)
+    await session.commit()
+    original_chunk_ids = {chunk.id for chunk in await chunk_rows(session, page_id)}
+
+    unavailable_provider = FakeEmbeddingProvider(fail_on="local")
+    unavailable_provider.version = "test-v2"
+    failed = await KnowledgeService(session, unavailable_provider).index_page(page_id)
+    await session.commit()
+
+    preserved_chunks = await chunk_rows(session, page_id)
+    assert failed.status == "failed"
+    assert {chunk.id for chunk in preserved_chunks} == original_chunk_ids
+    assert all(chunk.status == "ready" for chunk in preserved_chunks)
+    assert await session.scalar(text("SELECT count(*) FROM vec_knowledge_chunks")) == len(
+        preserved_chunks
+    )
+    assert await KnowledgeService(session, first_provider).semantic_search(workspace_id, "local")
+
+
+async def test_stale_generation_cannot_overwrite_newer_index(
+    session: AsyncSession,
+) -> None:
+    _, page_id, _ = await make_page(session)
+    service = KnowledgeService(session, FakeEmbeddingProvider())
+    await service.index_page(page_id)
+    await session.commit()
+
+    stale_generation = await service.mark_pending(page_id)
+    current_generation = await service.mark_pending(page_id)
+    current = await service.index_page(page_id, expected_generation=current_generation)
+    stale = await service.index_page(page_id, expected_generation=stale_generation)
+    await session.commit()
+
+    assert current.status == "ready"
+    assert stale.status == "ready"
+    assert stale.generation == current_generation
 
 
 async def test_embedding_configuration_change_reindexes_incompatible_chunks(

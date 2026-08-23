@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from goldenson_api.db.base import Base
@@ -32,6 +32,12 @@ class FileMetadata(Base):
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
     mime_type: Mapped[str] = mapped_column(String(255), nullable=False)
     size: Mapped[int] = mapped_column(Integer, nullable=False)
+    index_status: Mapped[str] = mapped_column(String(20), nullable=False, default="metadata_only")
+    index_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    index_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utc_now, onupdate=_utc_now
@@ -39,3 +45,7 @@ class FileMetadata(Base):
 
     workspace: Mapped[Workspace] = relationship(back_populates="files")
     page: Mapped[Page | None] = relationship(back_populates="files")
+
+    @property
+    def content_searchable(self) -> bool:
+        return self.search_text is not None

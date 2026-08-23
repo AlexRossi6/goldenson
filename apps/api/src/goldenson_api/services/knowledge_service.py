@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import sqlite3
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -24,6 +25,8 @@ from goldenson_api.services.block_service import BlockService
 ResultT = TypeVar("ResultT")
 _MAX_CHUNK_LENGTH = 1200
 _CHUNK_OVERLAP = 150
+_INDEX_FAILURE_MESSAGE = "Content indexing could not be completed."
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -104,14 +107,14 @@ class KnowledgeService:
         self._embeddings = provider
         self._blocks = BlockService(session)
 
-    async def mark_pending(self, page_id: str) -> None:
+    async def mark_pending(self, page_id: str) -> int | None:
         record = await self._session.scalar(
             select(PageKnowledge).where(PageKnowledge.page_id == page_id)
         )
         if record is None:
             page = await self._session.get(Page, page_id)
             if page is None:
-                return
+                return None
             record = PageKnowledge(
                 page_id=page.id,
                 workspace_id=page.workspace_id,
@@ -122,21 +125,36 @@ class KnowledgeService:
                 vector=[],
                 concepts=[],
                 status="pending",
+                generation=1,
             )
             self._session.add(record)
         else:
             record.status = "pending"
             record.error = None
+            record.generation += 1
         await self._session.flush()
+        return record.generation
 
-    async def mark_failed(self, page_id: str, error: str) -> None:
-        await self.mark_pending(page_id)
+    async def mark_indexing(self, page_id: str, expected_generation: int) -> bool:
         record = await self._session.scalar(
             select(PageKnowledge).where(PageKnowledge.page_id == page_id)
         )
-        if record is not None:
+        if record is None or record.generation != expected_generation:
+            return False
+        record.status = "indexing"
+        record.error = None
+        await self._session.flush()
+        return True
+
+    async def mark_failed(self, page_id: str, expected_generation: int | None = None) -> None:
+        record = await self._session.scalar(
+            select(PageKnowledge).where(PageKnowledge.page_id == page_id)
+        )
+        if record is not None and (
+            expected_generation is None or record.generation == expected_generation
+        ):
             record.status = "failed"
-            record.error = error[:500]
+            record.error = _INDEX_FAILURE_MESSAGE
             await self._session.flush()
 
     async def _run_sqlite(self, callback: Callable[[sqlite3.Connection], ResultT]) -> ResultT:
@@ -240,7 +258,10 @@ class KnowledgeService:
         return await self._run_sqlite(get_vector)
 
     async def index_page(
-        self, page_id: str, expected_page_version: int | None = None
+        self,
+        page_id: str,
+        expected_page_version: int | None = None,
+        expected_generation: int | None = None,
     ) -> PageKnowledge:
         page = await self._session.get(Page, page_id)
         if page is None:
@@ -267,6 +288,8 @@ class KnowledgeService:
             )
             self._session.add(record)
             await self._session.flush()
+        if expected_generation is not None and record.generation != expected_generation:
+            return record
         chunks = list(
             (
                 await self._session.scalars(
@@ -282,7 +305,7 @@ class KnowledgeService:
         page_hash = hashlib.sha256("\n".join(spec.text for spec in specs).encode()).hexdigest()
         desired_keys = {spec.key for spec in specs}
         obsolete = [chunk for chunk in chunks if chunk.chunk_key not in desired_keys]
-        failures: list[str] = []
+        failed = False
         dimensions = 0
         staged_vectors: dict[str, list[float]] = {}
         for spec in specs:
@@ -302,8 +325,11 @@ class KnowledgeService:
                 vector = await self._embeddings.embed(spec.text)
                 dimensions = len(vector)
                 staged_vectors[spec.key] = vector
-            except Exception as exc:
-                failures.append(str(exc)[:500])
+            except Exception:
+                failed = True
+                logger.exception(
+                    "knowledge embedding failed for page %s chunk %s", page_id, spec.key
+                )
         latest_page = await self._session.get(Page, page_id)
         latest_specs = (
             []
@@ -313,47 +339,40 @@ class KnowledgeService:
         latest_hash = hashlib.sha256(
             "\n".join(spec.text for spec in latest_specs).encode()
         ).hexdigest()
+        await self._session.refresh(record)
+        if expected_generation is not None and record.generation != expected_generation:
+            return record
         if (
             latest_page is None
             or latest_page.version != initial_page_version
             or latest_hash != page_hash
         ):
-            if expected_page_version is None:
-                record.status = "stale"
-                record.error = "page changed during indexing; retry required"
-                await self._session.flush()
+            record.status = "stale"
+            record.error = "Content changed while search was being prepared."
+            await self._session.flush()
+            return record
+        if failed:
+            if record.content_hash and record.content_hash != page_hash:
+                await self._remove_vectors(page_id=page_id)
+                for chunk in chunks:
+                    chunk.status = "stale"
+                    chunk.error = _INDEX_FAILURE_MESSAGE
+            record.status = "failed"
+            record.error = _INDEX_FAILURE_MESSAGE
+            await self._session.flush()
             return record
         record.content_hash = page_hash
         record.embedding_model = model
         record.embedding_version = self._embeddings.version
-        record.generation += 1
-        if failures:
-            changed_chunks = [
-                chunk
-                for spec in specs
-                if (chunk := by_key.get(spec.key)) is not None
-                and not (
-                    chunk.content_hash == hashlib.sha256(spec.text.encode()).hexdigest()
-                    and chunk.status == "ready"
-                )
-            ]
-            await self._remove_vectors([chunk.id for chunk in changed_chunks])
-            for chunk in changed_chunks:
-                chunk.status = "failed"
-                chunk.error = failures[0]
-            record.status = "failed"
-            record.error = failures[0]
-            await self._session.flush()
-            return record
         await self._remove_vectors([chunk.id for chunk in obsolete])
         for chunk in obsolete:
             await self._session.delete(chunk)
         await self._ensure_vector_table(dimensions)
         for spec in specs:
             content_hash = hashlib.sha256(spec.text.encode()).hexdigest()
-            chunk = by_key.get(spec.key)
-            if chunk is None:
-                chunk = KnowledgeChunk(
+            target_chunk = by_key.get(spec.key)
+            if target_chunk is None:
+                target_chunk = KnowledgeChunk(
                     page_knowledge_id=record.id,
                     workspace_id=page.workspace_id,
                     page_id=page.id,
@@ -369,20 +388,20 @@ class KnowledgeService:
                     embedding_dimensions=0,
                     status="pending",
                 )
-                self._session.add(chunk)
+                self._session.add(target_chunk)
             if spec.key in staged_vectors:
                 vector = staged_vectors[spec.key]
-                chunk.block_id = spec.block_id
-                chunk.text = spec.text
-                chunk.content_hash = content_hash
-                chunk.embedding_model = model
-                chunk.embedding_version = self._embeddings.version
-                chunk.embedding_dimensions = len(vector)
-                chunk.status = "ready"
-                chunk.indexed_at = datetime.now(UTC)
-                chunk.error = None
+                target_chunk.block_id = spec.block_id
+                target_chunk.text = spec.text
+                target_chunk.content_hash = content_hash
+                target_chunk.embedding_model = model
+                target_chunk.embedding_version = self._embeddings.version
+                target_chunk.embedding_dimensions = len(vector)
+                target_chunk.status = "ready"
+                target_chunk.indexed_at = datetime.now(UTC)
+                target_chunk.error = None
                 await self._session.flush()
-                await self._store_vector(chunk, vector)
+                await self._store_vector(target_chunk, vector)
         record.embedding_dimensions = dimensions
         record.vector = []
         record.concepts = []

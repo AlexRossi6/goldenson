@@ -28,3 +28,7 @@ export function getFileDownloadUrl(fileId: string): string {
 export function deleteFile(fileId: string): Promise<null> {
   return apiRequest<null>(`/files/${fileId}`, { method: 'DELETE' })
 }
+
+export function retryFileIndex(fileId: string): Promise<{ status: string }> {
+  return apiRequest<{ status: string }>(`/files/${fileId}/index/retry`, { method: 'POST' })
+}

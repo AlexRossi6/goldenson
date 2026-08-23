@@ -13,7 +13,7 @@ import { LocalAIManager } from '../local-ai/LocalAIManager'
 
 type AssistantPanelProps = {
   workspaceId: string
-  onSelectPage: (pageId: string) => void
+  onOpenSource: (source: AgentSource) => void
   onWorkspaceChanged?: (change: AgentWorkspaceChange) => void
 }
 
@@ -23,7 +23,7 @@ type ConversationMessage = {
   sources?: AgentSource[]
 }
 
-export function AssistantPanel({ workspaceId, onSelectPage, onWorkspaceChanged }: AssistantPanelProps) {
+export function AssistantPanel({ workspaceId, onOpenSource, onWorkspaceChanged }: AssistantPanelProps) {
   const [question, setQuestion] = useState('')
   const [conversation, setConversation] = useState<ConversationMessage[]>([])
   const [proposal, setProposal] = useState<AgentProposal | null>(null)
@@ -190,10 +190,10 @@ export function AssistantPanel({ workspaceId, onSelectPage, onWorkspaceChanged }
                 <ul>
                   {message.sources.map((source) => (
                     <li key={`${source.kind}-${source.block_id ?? source.file_id ?? source.page_id}`}>
-                      <button type="button" className="source-link" disabled={!source.page_id} onClick={() => source.page_id && onSelectPage(source.page_id)}>
+                      <button type="button" className="source-link" disabled={!source.page_id && !source.file_id} onClick={() => onOpenSource(source)}>
                         {source.title}
                       </button>
-                      <span>{source.kind === 'block' ? 'Block' : source.kind === 'file' ? 'File' : 'Page'} · {source.snippet}</span>
+                      <span>{source.kind === 'block' ? 'In page' : source.kind === 'file' ? 'File' : 'Page'} · {source.snippet}</span>
                     </li>
                   ))}
                 </ul>

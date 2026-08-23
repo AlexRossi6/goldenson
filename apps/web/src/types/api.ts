@@ -42,8 +42,40 @@ export type FileMetadata = {
   name: string
   mime_type: string
   size: number
+  index_status: 'pending' | 'indexing' | 'ready' | 'stale' | 'failed' | 'metadata_only'
+  content_searchable: boolean
+  indexed_at: string | null
   created_at: string
   updated_at: string
+}
+
+export type RetrievedSource = {
+  kind: 'page' | 'block' | 'file'
+  title: string
+  snippet: string
+  page_id: string | null
+  block_id: string | null
+  file_id: string | null
+  score: number
+}
+
+export type RetrievalResult = {
+  context: string
+  sources: RetrievedSource[]
+}
+
+export type IndexCounts = {
+  total: number
+  ready: number
+  indexing: number
+  stale: number
+  failed: number
+}
+
+export type WorkspaceIndexHealth = {
+  status: 'ready' | 'indexing' | 'stale' | 'failed'
+  pages: IndexCounts
+  files: IndexCounts & { metadata_only: number }
 }
 
 export type WorkspaceListResponse = {

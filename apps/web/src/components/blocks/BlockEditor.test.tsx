@@ -100,6 +100,21 @@ describe('BlockEditor', () => {
     expect(deleteAction.parentElement).toHaveClass('block-context-actions')
   })
 
+  it('highlights the originating block selected from a source', () => {
+    render(
+      <BlockEditor
+        blocks={[makeBlock({ id: 'source-block', page_id: 'p1', type: 'paragraph' })]}
+        highlightedBlockId="source-block"
+        onCreateBlock={vi.fn().mockResolvedValue(undefined)}
+        onUpdateBlock={vi.fn().mockResolvedValue(undefined)}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    expect(screen.getByRole('listitem')).toHaveClass('is-highlighted')
+    expect(screen.getByRole('listitem')).toHaveAttribute('data-block-id', 'source-block')
+  })
+
   it('edits paragraph and heading text directly in rendered content and persists on blur', async () => {
     const user = userEvent.setup()
     const onUpdateBlock = vi.fn().mockResolvedValue(undefined)

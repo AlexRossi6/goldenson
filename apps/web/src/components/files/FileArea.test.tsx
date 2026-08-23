@@ -7,6 +7,7 @@ import { FileArea } from './FileArea'
 
 const file: FileMetadata = {
   id: 'f1', workspace_id: 'w1', page_id: null, name: 'notes.md', mime_type: 'text/markdown', size: 2048,
+  index_status: 'ready', content_searchable: true, indexed_at: '2026-01-01T00:00:00.000000Z',
   created_at: '2026-01-01T00:00:00.000000Z', updated_at: '2026-01-01T00:00:00.000000Z',
 }
 
@@ -17,6 +18,7 @@ describe('FileArea', () => {
 
     expect(screen.getByRole('link', { name: 'notes.md' })).toHaveAttribute('href', '/api/files/f1/download')
     expect(screen.getByText('2 KB')).toBeInTheDocument()
+    expect(screen.getByText('Contents searchable')).toBeInTheDocument()
   })
 
   it('uploads a selected file and requests deletion through a callback', async () => {
@@ -39,5 +41,19 @@ describe('FileArea', () => {
     expect(screen.getByText('Loading files...')).toBeInTheDocument()
     rerender(<FileArea files={[]} loading={false} uploading={false} errorMessage={null} onUpload={vi.fn()} onDelete={vi.fn()} />)
     expect(screen.getByText('No files yet.')).toBeInTheDocument()
+  })
+
+  it('distinguishes stored-only files from recoverable failures', async () => {
+    const user = userEvent.setup()
+    const onRetryIndex = vi.fn()
+    const pdf = { ...file, id: 'pdf', name: 'reference.pdf', mime_type: 'application/pdf', index_status: 'metadata_only' as const, content_searchable: false, indexed_at: null }
+    const failed = { ...file, id: 'failed', name: 'broken.txt', index_status: 'failed' as const, content_searchable: false, indexed_at: null }
+    render(<FileArea files={[pdf, failed]} loading={false} uploading={false} errorMessage={null} onDelete={vi.fn()} onRetryIndex={onRetryIndex} />)
+
+    expect(screen.getByText('Stored · contents not yet searchable')).toBeInTheDocument()
+    expect(screen.getByText('Contents not searchable')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(onRetryIndex).toHaveBeenCalledWith(failed)
   })
 })

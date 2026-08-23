@@ -10,6 +10,9 @@ class FileMetadataRead(BaseModel):
     name: str
     mime_type: str
     size: int
+    index_status: str
+    content_searchable: bool
+    indexed_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

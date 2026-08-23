@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from alembic import command
+from goldenson_api.api import knowledge_tasks
 from goldenson_api.api.dependencies import get_db_session
 from goldenson_api.core.config import get_settings
 from goldenson_api.db.session import create_engine_and_sessionmaker
@@ -59,6 +60,7 @@ def api_client(
     monkeypatch.setenv("GOLDENSON_STORAGE_ROOT", str(tmp_path / "files"))
     get_settings.cache_clear()
     engine, factory = create_engine_and_sessionmaker(migrated_db_url)
+    monkeypatch.setattr(knowledge_tasks, "SessionLocal", factory)
 
     app = create_app()
 

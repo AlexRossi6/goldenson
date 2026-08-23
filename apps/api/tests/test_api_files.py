@@ -47,6 +47,7 @@ def test_upload_download_list_and_delete_file(api_client: TestClient, tmp_path: 
     list_response = api_client.get(f"/api/workspaces/{workspace_id}/files")
     assert list_response.status_code == 200
     assert list_response.json()["items"][0]["name"] == "notes.md"
+    assert list_response.json()["items"][0]["index_status"] == "ready"
 
     file_id = created["id"]
     download_response = api_client.get(f"/api/files/{file_id}/download")
@@ -59,6 +60,41 @@ def test_upload_download_list_and_delete_file(api_client: TestClient, tmp_path: 
     assert delete_response.status_code == 204
     assert api_client.get(f"/api/files/{file_id}").status_code == 404
     assert not any(path.is_file() for path in (tmp_path / "files").rglob("*"))
+
+
+def test_pdf_is_stored_but_content_is_not_marked_searchable(
+    api_client: TestClient,
+) -> None:
+    workspace_id = _create_workspace(api_client, "PDF storage")
+
+    response = api_client.post(
+        f"/api/workspaces/{workspace_id}/files",
+        files={"upload": ("reference.pdf", b"%PDF-1.4 placeholder", "application/pdf")},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["index_status"] == "metadata_only"
+    assert api_client.get(f"/api/files/{response.json()['id']}/download").status_code == 200
+
+
+def test_malformed_text_fails_indexing_without_blocking_file_crud(
+    api_client: TestClient,
+) -> None:
+    workspace_id = _create_workspace(api_client, "Malformed text")
+    response = api_client.post(
+        f"/api/workspaces/{workspace_id}/files",
+        files={"upload": ("broken.txt", b"\xff\xfe", "text/plain")},
+    )
+    assert response.status_code == 201
+    file_id = response.json()["id"]
+
+    failed = api_client.get(f"/api/files/{file_id}")
+    assert failed.status_code == 200
+    assert failed.json()["index_status"] == "failed"
+    retry = api_client.post(f"/api/files/{file_id}/index/retry")
+    assert retry.status_code == 200
+    assert api_client.get(f"/api/files/{file_id}").json()["index_status"] == "failed"
+    assert api_client.delete(f"/api/files/{file_id}").status_code == 204
 
 
 def test_file_download_isolated_by_file_id_and_missing_content_is_reported(

@@ -9,6 +9,7 @@ type PageEditorProps = {
   page: Page
   blocks: Block[]
   blocksLoading?: boolean
+  highlightedBlockId?: string | null
   attachments: FileMetadata[]
   attachmentsLoading: boolean
   attachmentsUploading: boolean
@@ -38,6 +39,8 @@ type PageEditorProps = {
   onDeleteBlock: (block: Block) => void | Promise<void>
   onUploadAttachment: (file: File) => Promise<void>
   onDeleteAttachment: (file: FileMetadata) => void
+  onRetryAttachmentIndex?: (file: FileMetadata) => void
+  retryingFileId?: string | null
   relatedPages?: RelatedPage[]
   relatedLoading?: boolean
   relatedError?: boolean
@@ -51,6 +54,7 @@ export function PageEditor({
   page,
   blocks,
   blocksLoading = false,
+  highlightedBlockId = null,
   attachments,
   attachmentsLoading,
   attachmentsUploading,
@@ -64,6 +68,8 @@ export function PageEditor({
   onRequestDelete,
   onUploadAttachment,
   onDeleteAttachment,
+  onRetryAttachmentIndex,
+  retryingFileId,
   relatedPages = [],
   relatedLoading = false,
   relatedError = false,
@@ -118,27 +124,19 @@ export function PageEditor({
         </div>
       </header>
 
-      {(knowledge?.status === 'ready' || knowledge?.status === 'pending' || knowledge?.status === 'indexing' || knowledge?.status === 'failed' || knowledge?.status === 'stale' || relatedPages.length > 0 || relatedLoading || relatedError) && (
-        <aside className="knowledge-strip" aria-label="Page knowledge">
+      {(knowledge || relatedPages.length > 0 || relatedLoading || relatedError) && (
+        <aside className="related-content" aria-label="Related content">
           <div>
-            <h3>Related</h3>
-            {knowledge?.status === 'pending' && <span className="knowledge-status">Indexing...</span>}
-            {knowledge?.status === 'indexing' && <span className="knowledge-status">Indexing...</span>}
-            {knowledge?.status === 'ready' && <span className="knowledge-status">Ready</span>}
-            {relatedLoading && <span className="knowledge-status">Finding related pages...</span>}
+            <h3>Related content</h3>
+            {(relatedLoading || knowledge?.status === 'pending' || knowledge?.status === 'indexing') && <span className="knowledge-status">Finding related content...</span>}
             {relatedError && <>
-              <span className="knowledge-status">Related pages unavailable.</span>
+              <span className="knowledge-status">Related content could not be loaded.</span>
               <button type="button" className="knowledge-retry" onClick={onRetryRelated}>Try again</button>
             </>}
             {(knowledge?.status === 'failed' || knowledge?.status === 'stale') && (
               <div className="knowledge-recovery">
-                <span className="knowledge-status">{knowledge.status === 'failed' ? 'Page analysis failed.' : 'Page analysis is out of date.'}</span>
-                <button type="button" className="knowledge-retry" onClick={onRetryKnowledge}>Retry analysis</button>
-              </div>
-            )}
-            {knowledge?.status === 'ready' && knowledge.concepts.length > 0 && (
-              <div className="concept-list" aria-label="Concepts">
-                {knowledge.concepts.map((concept) => <span className="concept-pill" key={concept}>{concept}</span>)}
+                <span className="knowledge-status">{knowledge.status === 'failed' ? 'Related content is unavailable.' : 'Related content may be out of date.'}</span>
+                <button type="button" className="knowledge-retry" onClick={onRetryKnowledge}>Refresh</button>
               </div>
             )}
           </div>
@@ -153,7 +151,7 @@ export function PageEditor({
             </ul>
           )}
           {!relatedLoading && !relatedError && knowledge?.status === 'ready' && relatedPages.length === 0 && (
-            <span className="knowledge-status">No related pages yet.</span>
+            <span className="knowledge-status">No related content found.</span>
           )}
         </aside>
       )}
@@ -161,6 +159,7 @@ export function PageEditor({
       <BlockEditor
         blocks={blocks}
         loading={blocksLoading}
+        highlightedBlockId={highlightedBlockId}
         onCreateBlock={onCreateBlock}
         onUpdateBlock={onUpdateBlock}
         onDeleteBlock={async (block) => onDeleteBlock(block)}
@@ -174,6 +173,8 @@ export function PageEditor({
         errorMessage={attachmentsError}
         onUpload={onUploadAttachment}
         onDelete={onDeleteAttachment}
+        onRetryIndex={onRetryAttachmentIndex}
+        retryingFileId={retryingFileId}
       />
     </section>
   )

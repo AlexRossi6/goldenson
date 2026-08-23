@@ -13,6 +13,7 @@ type BlockPayload = {
 type BlockEditorProps = {
   blocks: Block[]
   loading?: boolean
+  highlightedBlockId?: string | null
   onCreateBlock: (payload: { type: string; position: number; content: Record<string, unknown> }) => Promise<Block>
   onUpdateBlock: (blockId: string, payload: BlockPayload) => Promise<void>
   onDeleteBlock: (block: Block) => Promise<void>
@@ -22,7 +23,7 @@ function generateId(): string {
   return `item-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-export function BlockEditor({ blocks, loading = false, onCreateBlock, onUpdateBlock, onDeleteBlock }: BlockEditorProps) {
+export function BlockEditor({ blocks, loading = false, highlightedBlockId = null, onCreateBlock, onUpdateBlock, onDeleteBlock }: BlockEditorProps) {
   const sortedBlocks = useMemo(() => [...blocks].sort((a, b) => a.position - b.position || a.created_at.localeCompare(b.created_at)), [blocks])
   const [creating, setCreating] = useState(false)
 
@@ -52,7 +53,7 @@ export function BlockEditor({ blocks, loading = false, onCreateBlock, onUpdateBl
         </div>}
       {loading ? <p className="loading-copy" role="status">Loading page content...</p> : sortedBlocks.length === 0 ? <p className="empty-copy">A blank page is ready for your ideas.</p> : <ul className="block-list" aria-label="Page content">
         {sortedBlocks.map((block) => (
-          <InlineEditableBlock key={block.id} block={block} onCreateBlockAfter={createParagraphAfter} onUpdateBlock={onUpdateBlock} onDeleteBlock={onDeleteBlock} />
+          <InlineEditableBlock key={block.id} block={block} highlighted={block.id === highlightedBlockId} onCreateBlockAfter={createParagraphAfter} onUpdateBlock={onUpdateBlock} onDeleteBlock={onDeleteBlock} />
         ))}
       </ul>}
     </section>

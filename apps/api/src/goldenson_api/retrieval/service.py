@@ -11,7 +11,7 @@ from goldenson_api.services.file_service import FileService
 from goldenson_api.services.knowledge_service import KnowledgeService
 from goldenson_api.services.page_service import PageService
 
-_TOKEN_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]+", re.IGNORECASE)
+_TOKEN_PATTERN = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 
 
 class RetrievedSource(BaseModel):
@@ -133,12 +133,13 @@ class WorkspaceRetrievalService:
                     )
 
         for file_metadata in await self._files.list_workspace_files(workspace_id):
-            file_score = _keyword_score(query, file_metadata.name, "")
+            searchable_text = getattr(file_metadata, "search_text", None) or ""
+            file_score = _keyword_score(query, file_metadata.name, searchable_text)
             if file_score > 0:
                 candidates[("file", file_metadata.page_id, file_metadata.id)] = RetrievedSource(
                     kind="file",
                     title=file_metadata.name,
-                    snippet=file_metadata.name,
+                    snippet=searchable_text[:500] or file_metadata.name,
                     page_id=file_metadata.page_id,
                     file_id=file_metadata.id,
                     score=file_score * _KEYWORD_WEIGHT + _SOURCE_BONUS["file"],

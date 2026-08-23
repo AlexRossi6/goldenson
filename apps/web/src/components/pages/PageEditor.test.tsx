@@ -42,7 +42,7 @@ describe('PageEditor', () => {
   it('renders page attachments with an in-document add-file action', async () => {
     const user = userEvent.setup()
     const onUploadAttachment = vi.fn().mockResolvedValue(undefined)
-    render(<PageEditor page={page} blocks={[]} attachments={[{ id: 'f1', workspace_id: 'w1', page_id: 'p1', name: 'architecture.md', mime_type: 'text/markdown', size: 1024, created_at: page.created_at, updated_at: page.updated_at }]} attachmentsLoading={false} attachmentsUploading={false} attachmentsError={null} busy={false} errorMessage={null} onUpdatePage={vi.fn().mockResolvedValue(undefined)} onCreateBlock={vi.fn().mockResolvedValue(undefined)} onUpdateBlock={vi.fn().mockResolvedValue(undefined)} onDeleteBlock={vi.fn()} onRequestMove={vi.fn()} onRequestDelete={vi.fn()} onUploadAttachment={onUploadAttachment} onDeleteAttachment={vi.fn()} />)
+    render(<PageEditor page={page} blocks={[]} attachments={[{ id: 'f1', workspace_id: 'w1', page_id: 'p1', name: 'architecture.md', mime_type: 'text/markdown', size: 1024, index_status: 'ready', content_searchable: true, indexed_at: page.updated_at, created_at: page.created_at, updated_at: page.updated_at }]} attachmentsLoading={false} attachmentsUploading={false} attachmentsError={null} busy={false} errorMessage={null} onUpdatePage={vi.fn().mockResolvedValue(undefined)} onCreateBlock={vi.fn().mockResolvedValue(undefined)} onUpdateBlock={vi.fn().mockResolvedValue(undefined)} onDeleteBlock={vi.fn()} onRequestMove={vi.fn()} onRequestDelete={vi.fn()} onUploadAttachment={onUploadAttachment} onDeleteAttachment={vi.fn()} />)
 
     expect(screen.getByRole('region', { name: 'Page editor' })).toBeInTheDocument()
     expect(screen.getByText('Attachments')).toBeInTheDocument()
@@ -65,15 +65,15 @@ describe('PageEditor', () => {
     const onRetryKnowledge = vi.fn()
     render(<PageEditor page={page} blocks={[]} attachments={[]} attachmentsLoading={false} attachmentsUploading={false} attachmentsError={null} busy={false} errorMessage={null} knowledge={{ status: 'stale', concepts: [] }} onRetryKnowledge={onRetryKnowledge} onUpdatePage={vi.fn().mockResolvedValue(undefined)} onCreateBlock={vi.fn().mockResolvedValue(undefined)} onUpdateBlock={vi.fn().mockResolvedValue(undefined)} onDeleteBlock={vi.fn()} onRequestMove={vi.fn()} onRequestDelete={vi.fn()} onUploadAttachment={vi.fn().mockResolvedValue(undefined)} onDeleteAttachment={vi.fn()} />)
 
-    expect(screen.getByText('Page analysis is out of date.')).toBeInTheDocument()
-    expect(screen.getByText('Retry analysis')).toBeInTheDocument()
+    expect(screen.getByText('Related content may be out of date.')).toBeInTheDocument()
+    expect(screen.getByText('Refresh')).toBeInTheDocument()
   })
 
   it.each([
-    ['pending', 'Indexing...'],
-    ['indexing', 'Indexing...'],
-    ['ready', 'Ready'],
-    ['failed', 'Page analysis failed.'],
+    ['pending', 'Finding related content...'],
+    ['indexing', 'Finding related content...'],
+    ['ready', 'No related content found.'],
+    ['failed', 'Related content is unavailable.'],
   ] as const)('shows the %s knowledge state', (status, label) => {
     render(<PageEditor page={page} blocks={[]} attachments={[]} attachmentsLoading={false} attachmentsUploading={false} attachmentsError={null} busy={false} errorMessage={null} knowledge={{ status, concepts: [] }} onRetryKnowledge={vi.fn()} onUpdatePage={vi.fn().mockResolvedValue(undefined)} onCreateBlock={vi.fn().mockResolvedValue(undefined)} onUpdateBlock={vi.fn().mockResolvedValue(undefined)} onDeleteBlock={vi.fn()} onRequestMove={vi.fn()} onRequestDelete={vi.fn()} onUploadAttachment={vi.fn().mockResolvedValue(undefined)} onDeleteAttachment={vi.fn()} />)
 
@@ -82,13 +82,13 @@ describe('PageEditor', () => {
 
   it('shows related loading, error, and empty states', () => {
     const { rerender } = render(<PageEditor page={page} blocks={[]} attachments={[]} attachmentsLoading={false} attachmentsUploading={false} attachmentsError={null} busy={false} errorMessage={null} relatedLoading onUpdatePage={vi.fn().mockResolvedValue(undefined)} onCreateBlock={vi.fn().mockResolvedValue(undefined)} onUpdateBlock={vi.fn().mockResolvedValue(undefined)} onDeleteBlock={vi.fn()} onRequestMove={vi.fn()} onRequestDelete={vi.fn()} onUploadAttachment={vi.fn().mockResolvedValue(undefined)} onDeleteAttachment={vi.fn()} />)
-    expect(screen.getByText('Finding related pages...')).toBeInTheDocument()
+    expect(screen.getByText('Finding related content...')).toBeInTheDocument()
 
     rerender(<PageEditor page={page} blocks={[]} attachments={[]} attachmentsLoading={false} attachmentsUploading={false} attachmentsError={null} busy={false} errorMessage={null} relatedError onRetryRelated={vi.fn()} onUpdatePage={vi.fn().mockResolvedValue(undefined)} onCreateBlock={vi.fn().mockResolvedValue(undefined)} onUpdateBlock={vi.fn().mockResolvedValue(undefined)} onDeleteBlock={vi.fn()} onRequestMove={vi.fn()} onRequestDelete={vi.fn()} onUploadAttachment={vi.fn().mockResolvedValue(undefined)} onDeleteAttachment={vi.fn()} />)
-    expect(screen.getByText('Related pages unavailable.')).toBeInTheDocument()
+    expect(screen.getByText('Related content could not be loaded.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
 
     rerender(<PageEditor page={page} blocks={[]} attachments={[]} attachmentsLoading={false} attachmentsUploading={false} attachmentsError={null} busy={false} errorMessage={null} knowledge={{ status: 'ready', concepts: [] }} onUpdatePage={vi.fn().mockResolvedValue(undefined)} onCreateBlock={vi.fn().mockResolvedValue(undefined)} onUpdateBlock={vi.fn().mockResolvedValue(undefined)} onDeleteBlock={vi.fn()} onRequestMove={vi.fn()} onRequestDelete={vi.fn()} onUploadAttachment={vi.fn().mockResolvedValue(undefined)} onDeleteAttachment={vi.fn()} />)
-    expect(screen.getByText('No related pages yet.')).toBeInTheDocument()
+    expect(screen.getByText('No related content found.')).toBeInTheDocument()
   })
 })

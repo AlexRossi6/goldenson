@@ -11,6 +11,8 @@ type FileAreaProps = {
   uploading: boolean
   onUpload?: (file: File) => Promise<void>
   onDelete: (file: FileMetadata) => void
+  onRetryIndex?: (file: FileMetadata) => void
+  retryingFileId?: string | null
 }
 
 function formatSize(size: number): string {
@@ -19,7 +21,17 @@ function formatSize(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function FileArea({ files, title = 'Files', loading, errorMessage, uploading, onUpload, onDelete }: FileAreaProps) {
+function searchabilityLabel(file: FileMetadata): string {
+  if (file.index_status === 'metadata_only') return 'Stored · contents not yet searchable'
+  if (file.index_status === 'pending' || file.index_status === 'indexing') return 'Preparing content search...'
+  if (file.index_status === 'ready') return 'Contents searchable'
+  if (file.index_status === 'stale') return 'Content search needs refresh'
+  return file.content_searchable
+    ? 'Contents searchable · refresh failed'
+    : 'Contents not searchable'
+}
+
+export function FileArea({ files, title = 'Files', loading, errorMessage, uploading, onUpload, onDelete, onRetryIndex, retryingFileId }: FileAreaProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [localError, setLocalError] = useState<string | null>(null)
 
@@ -53,8 +65,16 @@ export function FileArea({ files, title = 'Files', loading, errorMessage, upload
         <ul className="file-list">
           {files.map((file) => (
             <li key={file.id} className="file-item">
-              <a href={getFileDownloadUrl(file.id)} className="file-link">{file.name}</a>
+              <div className="file-item-main">
+                <a href={getFileDownloadUrl(file.id)} className="file-link">{file.name}</a>
+                <span className={`file-index-status is-${file.index_status}`}>{searchabilityLabel(file)}</span>
+              </div>
               <span>{formatSize(file.size)}</span>
+              {onRetryIndex && ['failed', 'stale'].includes(file.index_status) && (
+                <button type="button" className="text-button" onClick={() => onRetryIndex(file)} disabled={retryingFileId === file.id}>
+                  {retryingFileId === file.id ? 'Retrying...' : 'Retry'}
+                </button>
+              )}
               <button type="button" className="text-button danger-link" onClick={() => onDelete(file)} aria-label={`Delete ${file.name}`}>Delete</button>
             </li>
           ))}

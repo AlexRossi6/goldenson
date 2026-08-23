@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import cast
 
 from sqlalchemy import Result, delete, select, update
@@ -19,6 +20,11 @@ class FileRepository:
         mime_type: str,
         size: int,
         page_id: str | None = None,
+        index_status: str = "metadata_only",
+        search_text: str | None = None,
+        content_hash: str | None = None,
+        index_generation: int = 0,
+        indexed_at: datetime | None = None,
     ) -> FileMetadata:
         file_metadata = FileMetadata(
             workspace_id=workspace_id,
@@ -27,6 +33,11 @@ class FileRepository:
             storage_key=storage_key,
             mime_type=mime_type,
             size=size,
+            index_status=index_status,
+            search_text=search_text,
+            content_hash=content_hash,
+            index_generation=index_generation,
+            indexed_at=indexed_at,
         )
         self._session.add(file_metadata)
         await self._session.flush()

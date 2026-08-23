@@ -9,6 +9,7 @@ type BlockPayload = {
 
 type InlineEditableBlockProps = {
   block: Block
+  highlighted?: boolean
   onCreateBlockAfter: (content: Record<string, unknown>) => Promise<Block>
   onUpdateBlock: (blockId: string, payload: BlockPayload) => Promise<void>
   onDeleteBlock: (block: Block) => Promise<void>
@@ -74,7 +75,7 @@ function focusAt(element: HTMLElement | null, offset: number): void {
   selection?.addRange(range)
 }
 
-export function InlineEditableBlock({ block, onCreateBlockAfter, onUpdateBlock, onDeleteBlock }: InlineEditableBlockProps) {
+export function InlineEditableBlock({ block, highlighted = false, onCreateBlockAfter, onUpdateBlock, onDeleteBlock }: InlineEditableBlockProps) {
   const initialText = block.type === 'code'
     ? typeof block.content.code === 'string' ? block.content.code : ''
     : typeof block.content.text === 'string' ? block.content.text : ''
@@ -274,7 +275,7 @@ export function InlineEditableBlock({ block, onCreateBlockAfter, onUpdateBlock, 
   const paragraph = parseMarkdownLine(text)
 
   return (
-    <li className={`block-card block-${block.type}`} data-block-id={block.id}>
+    <li className={`block-card block-${block.type}${highlighted ? ' is-highlighted' : ''}`} data-block-id={block.id}>
       <div className="block-context-actions">
         <button type="button" className="block-delete text-button danger-link" aria-label={`Delete ${block.type} block`} onClick={() => void onDeleteBlock(block)} disabled={busy}>Delete</button>
       </div>

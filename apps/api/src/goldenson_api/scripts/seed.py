@@ -14,6 +14,7 @@ from goldenson_api.schemas.block import BlockCreate
 from goldenson_api.schemas.page import PageCreate
 from goldenson_api.schemas.workspace import WorkspaceCreate
 from goldenson_api.services.block_service import BlockService
+from goldenson_api.services.file_index_service import FileIndexService
 from goldenson_api.services.file_service import FileService
 from goldenson_api.services.page_service import PageService
 from goldenson_api.services.workspace_service import WorkspaceService
@@ -173,7 +174,7 @@ async def seed(database_url: str | None = None) -> None:
         }
         for page_id, name, mime_type, content in file_examples:
             if name not in existing_names:
-                await file_service.upload_file(
+                file_metadata = await file_service.upload_file(
                     workspace.id,
                     page_id,
                     UploadFile(
@@ -182,6 +183,10 @@ async def seed(database_url: str | None = None) -> None:
                         headers=Headers({"content-type": mime_type}),
                     ),
                 )
+                if file_metadata.index_status == "pending":
+                    await FileIndexService(session, file_service).index_file(
+                        file_metadata.id, file_metadata.index_generation
+                    )
 
         await session.commit()
 

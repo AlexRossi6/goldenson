@@ -139,7 +139,7 @@ async def reindex_page(
     page = await PageService(session).get_page(str(page_id))
     if page is None:
         raise NotFoundError("page not found")
-    await KnowledgeService(session).mark_pending(page.id)
+    generation = await KnowledgeService(session).mark_pending(page.id)
     await session.commit()
-    queue_page_index(background_tasks, page.id, page.version)
+    queue_page_index(background_tasks, page.id, page.version, generation)
     return {"status": "pending"}
