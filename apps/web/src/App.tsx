@@ -502,11 +502,11 @@ function App() {
 
       <main className="main-panel">
         <header className="topbar">
-          <p className="eyebrow">Private knowledge workspace</p>
-          <h1>Your workspace</h1>
-          <p className="lead">
-            Capture ideas, organize pages, and explore your notes with your local assistant.
-          </p>
+          <div>
+            <p className="eyebrow">GoldenSon</p>
+            <h1>{workspace.name}</h1>
+          </div>
+          <p className="lead">Private knowledge workspace</p>
         </header>
 
         {errorMessage && <InlineNotice tone="error" message={errorMessage} />}
@@ -529,6 +529,7 @@ function App() {
             key={selectedPage.id}
             page={selectedPage}
             blocks={selectedBlocks}
+            blocksLoading={blocksQuery.isLoading}
             attachments={pageFilesQuery.data?.items ?? []}
             attachmentsLoading={pageFilesQuery.isLoading}
             attachmentsUploading={uploadFileMutation.isPending}
@@ -548,6 +549,7 @@ function App() {
             relatedError={relatedQuery.isError}
             knowledge={knowledgeQuery.data}
             onRetryKnowledge={() => reindexMutation.mutate(selectedPage.id)}
+            onRetryRelated={() => void relatedQuery.refetch()}
             onSelectPage={setSelectedPageId}
           />
         )}

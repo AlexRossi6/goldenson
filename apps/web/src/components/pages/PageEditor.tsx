@@ -4,11 +4,11 @@ import type { Block, FileMetadata, Page } from '../../types/api'
 import type { PageKnowledge, RelatedPage } from '../../api/knowledge'
 import { BlockEditor } from '../blocks/BlockEditor'
 import { FileArea } from '../files/FileArea'
-import { InlineNotice } from '../ui/InlineNotice'
 
 type PageEditorProps = {
   page: Page
   blocks: Block[]
+  blocksLoading?: boolean
   attachments: FileMetadata[]
   attachmentsLoading: boolean
   attachmentsUploading: boolean
@@ -43,18 +43,19 @@ type PageEditorProps = {
   relatedError?: boolean
   knowledge?: PageKnowledge
   onRetryKnowledge?: () => void
+  onRetryRelated?: () => void
   onSelectPage?: (pageId: string) => void
 }
 
 export function PageEditor({
   page,
   blocks,
+  blocksLoading = false,
   attachments,
   attachmentsLoading,
   attachmentsUploading,
   attachmentsError,
   busy,
-  errorMessage,
   onUpdatePage,
   onCreateBlock,
   onUpdateBlock,
@@ -68,6 +69,7 @@ export function PageEditor({
   relatedError = false,
   knowledge,
   onRetryKnowledge,
+  onRetryRelated,
   onSelectPage,
 }: PageEditorProps) {
   const [titleDraft, setTitleDraft] = useState(page.title)
@@ -84,11 +86,15 @@ export function PageEditor({
       return
     }
     setTitleStatus('saving')
-    await onUpdatePage(page.id, {
-      title: titleDraft.trim(),
-      version: page.version,
-    })
-    setTitleStatus('saved')
+    try {
+      await onUpdatePage(page.id, {
+        title: titleDraft.trim(),
+        version: page.version,
+      })
+      setTitleStatus('saved')
+    } catch {
+      setTitleStatus('unsaved')
+    }
   }
 
   return (
@@ -102,6 +108,7 @@ export function PageEditor({
             onChange={(event) => { setTitleDraft(event.target.value); setTitleStatus('unsaved') }}
             onBlur={() => void saveTitle()}
             onKeyDown={(event) => { if (event.key === 'Enter') { event.currentTarget.blur() } }}
+            disabled={busy}
           />
           <span className="save-status" aria-live="polite">{titleStatus === 'saving' ? 'Saving...' : titleStatus === 'unsaved' ? 'Unsaved' : 'Saved'}</span>
         </div>
@@ -111,8 +118,6 @@ export function PageEditor({
         </div>
       </header>
 
-      {errorMessage && <InlineNotice tone="error" message={errorMessage} />}
-
       {(knowledge?.status === 'ready' || knowledge?.status === 'pending' || knowledge?.status === 'indexing' || knowledge?.status === 'failed' || knowledge?.status === 'stale' || relatedPages.length > 0 || relatedLoading || relatedError) && (
         <aside className="knowledge-strip" aria-label="Page knowledge">
           <div>
@@ -121,9 +126,15 @@ export function PageEditor({
             {knowledge?.status === 'indexing' && <span className="knowledge-status">Indexing...</span>}
             {knowledge?.status === 'ready' && <span className="knowledge-status">Ready</span>}
             {relatedLoading && <span className="knowledge-status">Finding related pages...</span>}
-            {relatedError && <span className="knowledge-status">Related pages unavailable</span>}
+            {relatedError && <>
+              <span className="knowledge-status">Related pages unavailable.</span>
+              <button type="button" className="knowledge-retry" onClick={onRetryRelated}>Try again</button>
+            </>}
             {(knowledge?.status === 'failed' || knowledge?.status === 'stale') && (
-              <button type="button" className="knowledge-retry" onClick={onRetryKnowledge}>Retry analysis</button>
+              <div className="knowledge-recovery">
+                <span className="knowledge-status">{knowledge.status === 'failed' ? 'Page analysis failed.' : 'Page analysis is out of date.'}</span>
+                <button type="button" className="knowledge-retry" onClick={onRetryKnowledge}>Retry analysis</button>
+              </div>
             )}
             {knowledge?.status === 'ready' && knowledge.concepts.length > 0 && (
               <div className="concept-list" aria-label="Concepts">
@@ -149,6 +160,7 @@ export function PageEditor({
 
       <BlockEditor
         blocks={blocks}
+        loading={blocksLoading}
         onCreateBlock={onCreateBlock}
         onUpdateBlock={onUpdateBlock}
         onDeleteBlock={async (block) => onDeleteBlock(block)}

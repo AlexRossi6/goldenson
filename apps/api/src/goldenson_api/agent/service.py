@@ -8,6 +8,7 @@ import time
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
+from anyio import CancelScope
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -304,13 +305,14 @@ class AgentService:
         request: str | None = None,
         lifecycle_started: float | None = None,
     ) -> AsyncIterator[dict[str, object]]:
-        if run.id in _active_run_ids:
+        run_id = run.id
+        if run_id in _active_run_ids:
             raise ConflictError("agent run is already active")
-        _active_run_ids.add(run.id)
+        _active_run_ids.add(run_id)
         cancel_event = asyncio.Event()
-        _cancel_events[run.id] = cancel_event
+        _cancel_events[run_id] = cancel_event
         try:
-            yield {"type": "run", "run_id": run.id}
+            yield {"type": "run", "run_id": run_id}
             async for event in self._execute_segment(
                 run,
                 cancel_event,
@@ -319,8 +321,8 @@ class AgentService:
             ):
                 yield event
         finally:
-            _cancel_events.pop(run.id, None)
-            _active_run_ids.discard(run.id)
+            _cancel_events.pop(run_id, None)
+            _active_run_ids.discard(run_id)
 
     async def _execute_segment(
         self,
@@ -331,6 +333,8 @@ class AgentService:
         lifecycle_started: float | None,
     ) -> AsyncIterator[dict[str, object]]:
         started = time.monotonic()
+        run_id = run.id
+        cancelled = False
         try:
             if run.remaining_seconds <= 0:
                 raise TimeoutError
@@ -415,15 +419,20 @@ class AgentService:
                 ):
                     yield event
         except asyncio.CancelledError:
-            if run.status == "running":
-                await self._audit.save_run_state(
-                    run,
-                    messages=run.messages,
-                    tool_call_count=run.tool_call_count,
-                    remaining_seconds=run.remaining_seconds,
-                    status="resuming",
-                )
-                await self._session.commit()
+            cancelled = True
+            with CancelScope(shield=True):
+                await self._session.rollback()
+                persisted_run = await self._audit.get_run(run_id)
+                if persisted_run is not None and persisted_run.status == "running":
+                    await self._audit.save_run_state(
+                        persisted_run,
+                        messages=persisted_run.messages,
+                        tool_call_count=persisted_run.tool_call_count,
+                        remaining_seconds=persisted_run.remaining_seconds
+                        - (time.monotonic() - started),
+                        status="resuming",
+                    )
+                    await self._session.commit()
             raise
         except TimeoutError:
             await self._finish_run(run.id, "timed_out", "maximum run duration reached")
@@ -445,9 +454,10 @@ class AgentService:
             yield {"type": "error", "message": "The local agent could not complete this request."}
             yield {"type": "done", "status": "failed"}
         finally:
-            elapsed = time.monotonic() - started
-            run.remaining_seconds = max(0, run.remaining_seconds - elapsed)
-            await self._session.commit()
+            if not cancelled:
+                elapsed = time.monotonic() - started
+                run.remaining_seconds = max(0, run.remaining_seconds - elapsed)
+                await self._session.commit()
 
     async def _run_loop(
         self,
@@ -642,8 +652,10 @@ class AgentService:
                 return None
             return await provider_task
         finally:
+            provider_task.cancel()
             cancel_task.cancel()
-            await asyncio.gather(cancel_task, return_exceptions=True)
+            with CancelScope(shield=True):
+                await asyncio.gather(provider_task, cancel_task, return_exceptions=True)
 
     async def _finish_run(self, run_id: str, status: str, error_summary: str | None = None) -> None:
         run = await self._audit.get_run(run_id)

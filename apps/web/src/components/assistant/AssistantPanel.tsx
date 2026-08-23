@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 
 import {
   cancelAgentRun,
@@ -34,6 +34,15 @@ export function AssistantPanel({ workspaceId, onSelectPage, onWorkspaceChanged }
   const [error, setError] = useState<string | null>(null)
   const [localAIReady, setLocalAIReady] = useState(false)
   const controllerRef = useRef<AbortController | null>(null)
+  const transcriptRef = useRef<HTMLDivElement>(null)
+  const stickToBottomRef = useRef(true)
+
+  useEffect(() => {
+    const transcript = transcriptRef.current
+    if (transcript && (stickToBottomRef.current || proposal)) {
+      transcript.scrollTop = transcript.scrollHeight
+    }
+  }, [conversation, error, progressMessage, proposal])
 
   const handleEvent = (event: AgentEvent) => {
     if (event.type === 'run') setRunId(event.run_id)
@@ -78,6 +87,7 @@ export function AssistantPanel({ workspaceId, onSelectPage, onWorkspaceChanged }
 
     const controller = new AbortController()
     controllerRef.current = controller
+    stickToBottomRef.current = true
     setQuestion('')
     setConversation((current) => [...current, { role: 'user', content: message }, { role: 'assistant', content: '' }])
     setProposal(null)
@@ -158,7 +168,15 @@ export function AssistantPanel({ workspaceId, onSelectPage, onWorkspaceChanged }
       </header>
       <LocalAIManager onReadyChange={setLocalAIReady} />
 
-      <div className="assistant-transcript" aria-live="polite">
+      <div
+        className="assistant-transcript"
+        aria-live="polite"
+        ref={transcriptRef}
+        onScroll={(event) => {
+          const transcript = event.currentTarget
+          stickToBottomRef.current = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 48
+        }}
+      >
         {running && progressMessage && (
           <p className="assistant-progress" role="status">{progressMessage}</p>
         )}

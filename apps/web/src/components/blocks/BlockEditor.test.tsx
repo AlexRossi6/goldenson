@@ -22,6 +22,22 @@ function makeBlock(input: Partial<Block> & Pick<Block, 'id' | 'page_id' | 'type'
 
 describe('BlockEditor', () => {
   afterEach(cleanup)
+  it('shows loading state without empty-page or editing controls', () => {
+    render(
+      <BlockEditor
+        blocks={[]}
+        loading
+        onCreateBlock={vi.fn().mockResolvedValue(undefined)}
+        onUpdateBlock={vi.fn().mockResolvedValue(undefined)}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading page content...')
+    expect(screen.queryByText('A blank page is ready for your ideas.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '+ Add block' })).not.toBeInTheDocument()
+  })
+
   it('creates a first block when page is empty', async () => {
     const user = userEvent.setup()
     const onCreateBlock = vi.fn().mockResolvedValue(undefined)

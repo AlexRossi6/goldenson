@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
-
 :root {
   --ink: #17251f;
   --muted-ink: #4f5f56;
@@ -22,7 +20,7 @@ body {
   background-image: linear-gradient(rgba(23, 37, 31, 0.035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(23, 37, 31, 0.035) 1px, transparent 1px);
   background-size: 28px 28px;
-  font-family: 'Space Grotesk', 'Trebuchet MS', sans-serif;
+  font-family: 'Avenir Next', 'Century Gothic', 'Trebuchet MS', sans-serif;
 }
 
 #root {
@@ -188,6 +186,13 @@ textarea {
   margin: 1rem 0;
   padding: 0.9rem 1rem;
   border-block: 1px solid var(--line);
+}
+
+.knowledge-recovery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
 }
 
 .knowledge-strip h3 {
@@ -642,9 +647,24 @@ label {
 }
 
 .topbar {
-  margin-bottom: 2.5rem;
-  padding-bottom: 1.25rem;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.85rem;
   border-bottom: 1px solid var(--line);
+}
+
+.topbar h1 {
+  margin: 0.2rem 0 0;
+  font-size: 2rem;
+  line-height: 1.05;
+}
+
+.topbar .lead {
+  font-family: 'DM Mono', 'Courier New', monospace;
+  font-size: 0.75rem;
 }
 
 .eyebrow {
@@ -1325,6 +1345,16 @@ h3 {
     border-bottom: 1px solid var(--ink);
   }
 
+  .side-panel.is-collapsed {
+    width: 100%;
+    min-width: 0;
+    padding: 0.75rem 1rem;
+  }
+
+  .side-panel.is-collapsed .sidebar-header {
+    align-items: center;
+  }
+
   .assistant-panel {
     grid-column: auto;
   }
@@ -1346,6 +1376,14 @@ h3 {
 
   h1 {
     font-size: clamp(2rem, 10vw, 3rem);
+  }
+
+  .topbar {
+    align-items: start;
+  }
+
+  .topbar h1 {
+    font-size: 1.65rem;
   }
 
   .empty-card,

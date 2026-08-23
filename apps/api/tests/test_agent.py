@@ -5,6 +5,7 @@ import json
 from collections.abc import AsyncIterator, Sequence
 from typing import cast
 
+import anyio
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -823,6 +824,26 @@ async def test_cancellation_interrupts_in_flight_provider(session: AsyncSession)
     events = await asyncio.wait_for(remaining, timeout=1)
 
     assert events[-1] == {"type": "done", "status": "cancelled"}
+
+
+@pytest.mark.asyncio
+async def test_client_disconnect_preserves_resumable_run(session: AsyncSession) -> None:
+    workspace_id, _ = await seed_workspace(session)
+    provider = BlockingProvider()
+    service = AgentService(
+        session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
+    )
+    stream = service.run(workspace_id, "Long question")
+    run_event = await anext(stream)
+
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(collect_stream_events, stream)
+        await provider.started.wait()
+        task_group.cancel_scope.cancel()
+
+    run = await AgentAuditRepository(session).get_run(str(run_event["run_id"]))
+    assert run is not None
+    assert run.status == "resuming"
 
 
 @pytest.mark.asyncio

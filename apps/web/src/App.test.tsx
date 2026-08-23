@@ -110,7 +110,8 @@ describe('App product language', () => {
     })
     renderApp()
 
-    expect(await screen.findByRole('heading', { name: 'Your workspace' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'My Workspace', level: 1 })).toBeInTheDocument()
+    expect(screen.getByText('GoldenSon')).toBeInTheDocument()
     await waitFor(() => expect(apiMocks.listPages).toHaveBeenCalled())
     expect(screen.queryByText(/REST API|persist.*API/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/^Pages:/)).not.toBeInTheDocument()
