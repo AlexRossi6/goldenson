@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 from collections.abc import AsyncIterator, Sequence
 from typing import cast
@@ -8,7 +9,7 @@ from typing import cast
 import anyio
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -33,6 +34,7 @@ from goldenson_api.schemas.page import PageCreate
 from goldenson_api.schemas.workspace import WorkspaceCreate
 from goldenson_api.services.block_service import BlockService
 from goldenson_api.services.errors import BadRequestError, NotFoundError
+from goldenson_api.services.file_service import FileService
 from goldenson_api.services.page_service import PageService
 from goldenson_api.services.workspace_service import WorkspaceService
 
@@ -223,6 +225,21 @@ async def test_read_tool_executes_without_approval(session: AsyncSession) -> Non
 
     assert result["page"]["id"] == page_id  # type: ignore[index]
     assert len(result["blocks"]) == 1  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_read_file_rejects_binary_content_declared_as_text(session: AsyncSession) -> None:
+    workspace_id, _ = await seed_workspace(session)
+    file_metadata = await FileService(session).upload_file(
+        workspace_id,
+        None,
+        UploadFile(filename="spoofed.txt", file=io.BytesIO(b"\x00\xffbinary")),
+    )
+    await session.commit()
+    arguments = validate_tool_arguments("read_file", {"file_id": file_metadata.id})
+
+    with pytest.raises(BadRequestError, match="only text workspace files"):
+        await AgentToolExecutor(session, workspace_id).execute("read_file", arguments)
 
 
 @pytest.mark.asyncio

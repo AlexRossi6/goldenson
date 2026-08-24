@@ -45,6 +45,9 @@ function App() {
 
   const workspace = workspaceQuery.data?.items[0] ?? null
   const workspaceId = workspace?.id ?? null
+  const invalidateWorkspaceSearch = () => queryClient.invalidateQueries({
+    queryKey: ['workspace-search', workspaceId],
+  })
 
   const pagesQuery = useQuery({
     queryKey: ['pages', workspaceId],
@@ -172,6 +175,7 @@ function App() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['pages', createdPage.workspace_id] }),
         queryClient.invalidateQueries({ queryKey: ['index-health', createdPage.workspace_id] }),
+        invalidateWorkspaceSearch(),
       ])
       setSelectedPageId(createdPage.id)
       setPageExpanded(createdPage.id, true)
@@ -194,6 +198,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['page-knowledge', updatedPage.id] })
       await queryClient.invalidateQueries({ queryKey: ['related-pages', updatedPage.id] })
       await queryClient.invalidateQueries({ queryKey: ['index-health', updatedPage.workspace_id] })
+      await invalidateWorkspaceSearch()
     },
     onError: async (error) => {
       if (error instanceof ApiClientError && error.code === 'CONCURRENCY_CONFLICT') {
@@ -212,6 +217,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['pages', workspaceId] })
       await queryClient.invalidateQueries({ queryKey: ['files', workspaceId] })
       await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
+      await invalidateWorkspaceSearch()
       setSelectedPageId(null)
       setErrorMessage(null)
     },
@@ -239,6 +245,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['page-knowledge', createdBlock.page_id] })
       await queryClient.invalidateQueries({ queryKey: ['related-pages', createdBlock.page_id] })
       await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
+      await invalidateWorkspaceSearch()
       setErrorMessage(null)
     },
     onError: (error) => {
@@ -264,6 +271,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['page-knowledge', updatedBlock.page_id] })
       await queryClient.invalidateQueries({ queryKey: ['related-pages', updatedBlock.page_id] })
       await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
+      await invalidateWorkspaceSearch()
       setErrorMessage(null)
     },
     onError: async (error) => {
@@ -286,6 +294,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['blocks', selectedPageId] })
       await queryClient.invalidateQueries({ queryKey: ['page-knowledge', selectedPageId] })
       await queryClient.invalidateQueries({ queryKey: ['related-pages', selectedPageId] })
+      await invalidateWorkspaceSearch()
       setErrorMessage(null)
     },
     onError: (error) => {
@@ -303,6 +312,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['files', workspaceId] })
       await queryClient.invalidateQueries({ queryKey: ['page-files', selectedPageId] })
       await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
+      await invalidateWorkspaceSearch()
       setErrorMessage(null)
     },
     onError: (error) => setErrorMessage(error instanceof ApiClientError ? error.message : 'Could not add this file.'),
@@ -314,6 +324,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['files', workspaceId] })
       await queryClient.invalidateQueries({ queryKey: ['page-files', selectedPageId] })
       await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
+      await invalidateWorkspaceSearch()
       setDeleteTarget(null)
       setErrorMessage(null)
     },
@@ -483,6 +494,7 @@ function App() {
       }
       await Promise.all(invalidations)
     }
+    await invalidateWorkspaceSearch()
   }
 
   if (workspaceQuery.isLoading) {

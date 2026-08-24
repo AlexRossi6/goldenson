@@ -218,7 +218,7 @@ Fully Local Foundation
 - pages
 - editor
 - files
-- local search
+- hybrid local retrieval
 - local embeddings
 - local AI inference
 - assistant
@@ -228,7 +228,6 @@ Fully Local Foundation
 ### Phase 2
 Knowledge intelligence
 
-- hybrid retrieval
 - reranking
 - relationships
 - knowledge graph

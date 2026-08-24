@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -95,11 +96,16 @@ async def test_unchanged_content_is_not_reembedded_and_deleted_block_disappears(
 
 
 async def test_failed_index_is_observable_without_partial_new_vectors(
-    session: AsyncSession,
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace_id, page_id, _ = await make_page(session)
     provider = FakeEmbeddingProvider(fail_on="local")
     service = KnowledgeService(session, provider)
+    warnings: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        "goldenson_api.services.knowledge_service.logger.warning",
+        lambda *arguments: warnings.append(arguments),
+    )
 
     record = await service.index_page(page_id)
     await session.commit()
@@ -107,6 +113,8 @@ async def test_failed_index_is_observable_without_partial_new_vectors(
     assert record.status == "failed"
     assert record.error == "Content indexing could not be completed."
     assert await service.semantic_search(workspace_id, "local") == []
+    assert warnings
+    assert "semantic search unavailable; using lexical results" in str(warnings[0][0])
 
 
 async def test_retry_succeeds_after_transient_embedding_failure(

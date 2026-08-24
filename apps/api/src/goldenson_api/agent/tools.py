@@ -263,7 +263,13 @@ class AgentToolExecutor:
         if not file_metadata.mime_type.startswith("text/") and suffix not in text_suffixes:
             raise BadRequestError("only text workspace files can be read by the agent")
         path = self._files.download_path(file_metadata)
-        content = path.read_text(encoding="utf-8")[:100_000]
+        try:
+            with path.open(encoding="utf-8") as file:
+                content = file.read(100_000)
+        except UnicodeDecodeError as exc:
+            raise BadRequestError("only text workspace files can be read by the agent") from exc
+        if "\x00" in content:
+            raise BadRequestError("only text workspace files can be read by the agent")
         return {
             "file": FileMetadataRead.model_validate(file_metadata).model_dump(mode="json"),
             "content": content,

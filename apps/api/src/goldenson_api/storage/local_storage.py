@@ -1,20 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import UploadFile
 
 from goldenson_api.services.errors import FileTooLargeError, StorageError
-
-
-@dataclass(frozen=True)
-class StoredFile:
-    storage_key: str
-    size: int
-    sha256: str
+from goldenson_api.storage.provider import StoredFile
 
 
 class LocalStorage:

@@ -445,7 +445,12 @@ class KnowledgeService:
             matches = await self._nearest(
                 sqlite_vec.serialize_float32(query_vector), workspace_id, limit
             )
-        except (httpx.HTTPError, RuntimeError, ValueError, sqlite3.OperationalError):
+        except (httpx.HTTPError, RuntimeError, ValueError, sqlite3.OperationalError) as exc:
+            logger.warning(
+                "semantic search unavailable; using lexical results for workspace %s: %s",
+                workspace_id,
+                exc,
+            )
             return []
         chunks = await self._session.scalars(
             select(KnowledgeChunk).where(

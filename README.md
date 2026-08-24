@@ -12,7 +12,10 @@ the broader direction is described in [docs/vision.md](docs/vision.md).
 - Local workspaces with nested pages and block-based editing
 - Paragraph, heading, checklist, code, quote, and divider blocks
 - Local file uploads and page attachments
-- Keyword retrieval across pages, blocks, and file metadata
+- Hybrid keyword and semantic retrieval across pages and blocks
+- Filename search for all files and content search for supported UTF-8 text files
+- Recoverable page and file indexing with visible health and retry controls
+- Related-page discovery and source navigation back to pages, blocks, and files
 - Managed local AI through Ollama with an `LLMProvider` abstraction
 - Streaming assistant responses with retrieved source references
 - Validated agent tools for search, reading, structured queries, pages, tasks, and files
@@ -30,9 +33,8 @@ cloud model and does not include telemetry.
 
 GoldenSon aims to become a personal knowledge system that AI can understand,
 analyze, and safely operate on, rather than a notes application with a chatbot
-attached. The long-term direction includes semantic and hybrid retrieval,
-versioned embeddings, richer relationships, proactive insights, advanced agents,
-and explicit opt-in integrations.
+attached. The long-term direction includes richer relationships, proactive
+insights, advanced agents, and explicit opt-in integrations.
 
 Those items are direction, not current functionality. See
 [docs/vision.md](docs/vision.md) for the full roadmap.
@@ -52,6 +54,7 @@ services / repositories / providers
 - **Frontend:** React, TypeScript, Vite, TanStack Query, Zustand
 - **Backend:** Python 3.12+, FastAPI, Pydantic, SQLAlchemy, Alembic, SQLite
 - **Local AI:** Ollama through an OpenAI-compatible provider interface
+- **Storage:** A workspace-scoped `StorageProvider` with a local filesystem implementation
 - **Tooling:** pnpm, uv, Ruff, mypy, pytest, Vitest, Oxlint
 
 The agent never receives unrestricted shell, SQL, HTTP, or filesystem access.
@@ -124,6 +127,8 @@ Relevant defaults are documented in [.env.example](.env.example):
 ```bash
 GOLDENSON_OLLAMA_BASE_URL=http://127.0.0.1:11434
 GOLDENSON_OLLAMA_RUNTIME_ROOT=~/.goldenson/runtime
+GOLDENSON_EMBEDDING_MODEL=
+GOLDENSON_KNOWLEDGE_INDEX_TIMEOUT_SECONDS=90
 GOLDENSON_AGENT_MAX_TOOL_CALLS=8
 GOLDENSON_AGENT_MAX_RUN_SECONDS=60
 GOLDENSON_AGENT_PROVIDER_TIMEOUT_SECONDS=45
@@ -132,6 +137,15 @@ GOLDENSON_AGENT_TOOL_TIMEOUT_SECONDS=10
 
 The Ollama endpoint must resolve to loopback. Provider requests explicitly disable
 model reasoning where supported (`think: false`, `reasoning_effort: none`).
+
+Semantic retrieval is enabled only when `GOLDENSON_EMBEDDING_MODEL` names an
+embedding model already installed in Ollama. Without it, keyword retrieval remains
+available. GoldenSon never downloads an embedding model or falls back to a cloud
+provider automatically.
+
+File content search currently accepts bounded UTF-8 text. PDFs and other binary
+formats are stored locally and remain searchable by filename and metadata, but
+their contents are not parsed yet.
 
 ## Agent lifecycle
 
@@ -178,5 +192,5 @@ CI runs these checks for pushes and pull requests through
 
 GoldenSon is under active development and is not yet packaged as a desktop
 application. Current work is focused on making the local knowledge workspace and
-its controlled agent dependable before expanding into semantic retrieval,
+its controlled agent dependable before expanding into richer document parsing,
 background workflows, integrations, or synchronization.

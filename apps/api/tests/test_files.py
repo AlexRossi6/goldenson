@@ -69,3 +69,30 @@ async def test_upload_cleans_up_file_when_metadata_insert_fails(
         )
 
     assert not any(path.is_file() for path in (tmp_path / "files").rglob("*"))
+
+
+@pytest.mark.asyncio
+async def test_delete_metadata_failure_preserves_stored_content(
+    session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = await WorkspaceService(session).create_workspace(
+        WorkspaceCreate(name="Delete Failure Workspace")
+    )
+    file_service = FileService(session, LocalStorage(tmp_path / "files"))
+    file_metadata = await file_service.upload_file(
+        workspace.id,
+        None,
+        UploadFile(filename="keep.txt", file=io.BytesIO(b"preserve me")),
+    )
+    await session.commit()
+    stored_path = file_service.download_path(file_metadata)
+    monkeypatch.setattr(
+        file_service._repository,
+        "delete_by_id",
+        AsyncMock(side_effect=RuntimeError("database failure")),
+    )
+
+    with pytest.raises(RuntimeError, match="database failure"):
+        await file_service.delete_file(file_metadata.id)
+
+    assert stored_path.read_bytes() == b"preserve me"

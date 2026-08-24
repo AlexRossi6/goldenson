@@ -11,6 +11,7 @@ from goldenson_api.db.repositories.page_repository import PageRepository
 from goldenson_api.db.repositories.workspace_repository import WorkspaceRepository
 from goldenson_api.services.errors import BadRequestError, NotFoundError
 from goldenson_api.storage.local_storage import LocalStorage
+from goldenson_api.storage.provider import StorageProvider
 
 _TEXT_MIME_TYPES = {"application/json", "application/xml"}
 _TEXT_SUFFIXES = {".csv", ".json", ".log", ".md", ".markdown", ".txt", ".xml"}
@@ -25,7 +26,7 @@ def supports_file_content_search(name: str, mime_type: str) -> bool:
 
 
 class FileService:
-    def __init__(self, session: AsyncSession, storage: LocalStorage | None = None) -> None:
+    def __init__(self, session: AsyncSession, storage: StorageProvider | None = None) -> None:
         self._repository = FileRepository(session)
         self._workspace_repository = WorkspaceRepository(session)
         self._page_repository = PageRepository(session)
@@ -133,12 +134,12 @@ class FileService:
     async def detach_from_pages(self, page_ids: list[str]) -> None:
         await self._repository.detach_from_pages(page_ids)
 
-    async def delete_file(self, file_id: str) -> None:
+    async def delete_file(self, file_id: str) -> str:
         file_metadata = await self._repository.get_by_id(file_id)
         if file_metadata is None:
             raise NotFoundError("file metadata not found")
 
-        self._storage.delete_file(file_metadata.storage_key)
         deleted = await self._repository.delete_by_id(file_id)
         if not deleted:
             raise NotFoundError("file metadata not found")
+        return file_metadata.storage_key

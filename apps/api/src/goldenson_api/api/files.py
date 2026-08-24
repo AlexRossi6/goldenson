@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -14,6 +15,7 @@ from goldenson_api.services.file_index_service import FileIndexService
 from goldenson_api.services.file_service import FileService
 
 router = APIRouter(tags=["Files"])
+logger = logging.getLogger(__name__)
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]
 UploadPart = File(...)
 PagePart = Form(default=None)
@@ -127,7 +129,11 @@ async def download_file(file_id: UUID, session: DbSession) -> FileResponse:
 async def delete_file_metadata(file_id: UUID, session: DbSession) -> None:
     service = FileService(session)
 
-    async def action() -> None:
-        await service.delete_file(str(file_id))
+    async def action() -> str:
+        return await service.delete_file(str(file_id))
 
-    await run_mutation(session, action)
+    storage_key = await run_mutation(session, action)
+    try:
+        service.cleanup_file(storage_key)
+    except Exception:
+        logger.exception("file storage cleanup failed for file %s", file_id)

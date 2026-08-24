@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -192,6 +192,20 @@ describe('AssistantPanel', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Searching your workspace')
     callback.send?.({ type: 'sources', sources: [] })
     expect(await screen.findByRole('status')).toHaveTextContent('Thinking')
+  })
+
+  it('does not submit while an input method is composing text', async () => {
+    const user = userEvent.setup()
+    apiMocks.streamAgentRun.mockResolvedValue(undefined)
+    render(<AssistantPanel workspaceId="workspace-1" onOpenSource={vi.fn()} />)
+
+    const question = screen.getByLabelText('Ask the workspace assistant')
+    await waitFor(() => expect(question).toBeEnabled())
+    await user.type(question, '未確定')
+    fireEvent.keyDown(question, { key: 'Enter', isComposing: true })
+
+    expect(apiMocks.streamAgentRun).not.toHaveBeenCalled()
+    expect(question).toHaveValue('未確定')
   })
 
   it('collapses and expands the responsive assistant content', async () => {

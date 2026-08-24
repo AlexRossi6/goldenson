@@ -266,4 +266,49 @@ describe('App product language', () => {
       'noopener,noreferrer',
     )
   })
+
+  it('removes stale active search results after deleting a file', async () => {
+    const user = userEvent.setup()
+    const file = {
+      id: 'file-1',
+      workspace_id: 'workspace-1',
+      page_id: null,
+      name: 'temporary.txt',
+      mime_type: 'text/plain',
+      size: 12,
+      index_status: 'ready',
+      index_error: null,
+      content_searchable: true,
+      indexed_at: '2026-01-01T00:00:00Z',
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    apiMocks.listWorkspaces.mockResolvedValue({
+      items: [{
+        id: 'workspace-1', name: 'My Workspace',
+        created_at: file.created_at, updated_at: file.created_at,
+      }],
+    })
+    apiMocks.listFiles.mockResolvedValueOnce({ items: [file] }).mockResolvedValue({ items: [] })
+    apiMocks.deleteFile.mockResolvedValue(undefined)
+    apiMocks.searchWorkspace
+      .mockResolvedValueOnce({
+        context: '',
+        sources: [{
+          kind: 'file', title: file.name, snippet: 'temporary content',
+          page_id: null, block_id: null, file_id: file.id, score: 0.8,
+        }],
+      })
+      .mockResolvedValue({ context: '', sources: [] })
+    renderApp()
+
+    await user.type(await screen.findByRole('searchbox', { name: 'Search workspace' }), 'temporary')
+    await user.click(screen.getByRole('button', { name: 'Search' }))
+    expect(await screen.findByRole('button', { name: /temporary\.txt.*temporary content/i })).toBeInTheDocument()
+    const files = screen.getByRole('region', { name: 'Workspace files' })
+    await user.click(await within(files).findByRole('button', { name: 'Delete temporary.txt' }))
+    await user.click(await screen.findByRole('button', { name: 'Remove file' }))
+
+    await waitFor(() => expect(apiMocks.searchWorkspace).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('No matching content found.')).toBeInTheDocument()
+  })
 })
