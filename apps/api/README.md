@@ -8,6 +8,7 @@ approval-gated agent.
 - Workspace, page, block, and file APIs with optimistic concurrency
 - Hybrid keyword and local semantic retrieval with source provenance
 - Evidence-based related content using the same bounded hybrid retrieval path
+- Grounded assistant context with deterministic insufficient-evidence handling
 - Recoverable page and UTF-8 text-file indexing with health and retry endpoints
 - Managed loopback Ollama runtime and model selection
 - Streaming, approval-gated agent runs with explicit tools and a sanitized audit trail

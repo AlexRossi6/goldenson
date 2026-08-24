@@ -17,7 +17,8 @@ the broader direction is described in [docs/vision.md](docs/vision.md).
 - Recoverable page and file indexing with visible health and retry controls
 - Evidence-based related content with previews and navigation to matching blocks
 - Managed local AI through Ollama with an `LLMProvider` abstraction
-- Streaming assistant responses with retrieved source references
+- Grounded assistant responses with bounded retrieved context and navigable source references
+- Honest insufficient-evidence answers instead of unsupported workspace claims
 - Validated agent tools for search, reading, structured queries, pages, tasks, and files
 - Mandatory approval for every WRITE and DESTRUCTIVE agent action
 - Persistent agent runs that pause for approval and resume the same reasoning loop

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
 import { useUiStore } from './stores/ui'
+import type { RetrievedSource } from './types/api'
 
 const apiMocks = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
@@ -66,24 +67,42 @@ vi.mock('./api/knowledge', () => ({
 }))
 vi.mock('./components/assistant/AssistantPanel', () => ({
   AssistantPanel: ({
+    onOpenSource,
     onWorkspaceChanged,
   }: {
+    onOpenSource: (source: RetrievedSource) => void
     onWorkspaceChanged: (change: {
       type: 'workspace_changed'
       tool_name: string
       result: Record<string, unknown>
     }) => void
   }) => (
-    <button
-      type="button"
-      onClick={() => onWorkspaceChanged({
-        type: 'workspace_changed',
-        tool_name: 'create_page',
-        result: { id: 'agent-page', workspace_id: 'workspace-1' },
-      })}
-    >
-      Simulate agent create
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => onWorkspaceChanged({
+          type: 'workspace_changed',
+          tool_name: 'create_page',
+          result: { id: 'agent-page', workspace_id: 'workspace-1' },
+        })}
+      >
+        Simulate agent create
+      </button>
+      <button
+        type="button"
+        onClick={() => onOpenSource({
+          kind: 'block',
+          title: 'Assistant evidence page',
+          snippet: 'Grounded assistant evidence',
+          page_id: 'assistant-page',
+          block_id: 'assistant-block',
+          file_id: null,
+          score: 0.9,
+        })}
+      >
+        Simulate assistant source
+      </button>
+    </>
   ),
 }))
 
@@ -235,6 +254,41 @@ describe('App product language', () => {
     const pageContent = await screen.findByRole('list', { name: 'Page content' })
     expect(within(pageContent).getByRole('listitem')).toHaveClass('is-highlighted')
     expect(within(pageContent).getByRole('listitem')).toHaveAttribute('data-block-id', 'block-2')
+  })
+
+  it('opens and highlights exact block provenance from an assistant source', async () => {
+    const user = userEvent.setup()
+    const pages = [
+      {
+        id: 'page-1', workspace_id: 'workspace-1', parent_page_id: null, title: 'First page', position: 0, version: 1,
+        created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'assistant-page', workspace_id: 'workspace-1', parent_page_id: null, title: 'Assistant evidence page', position: 1, version: 1,
+        created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+      },
+    ]
+    apiMocks.listWorkspaces.mockResolvedValue({
+      items: [{ id: 'workspace-1', name: 'My Workspace', created_at: pages[0].created_at, updated_at: pages[0].updated_at }],
+    })
+    apiMocks.listPages.mockResolvedValue({ items: pages })
+    apiMocks.getPage.mockImplementation((pageId: string) => Promise.resolve(pages.find((page) => page.id === pageId)))
+    apiMocks.listBlocks.mockImplementation((pageId: string) => Promise.resolve({
+      items: pageId === 'assistant-page' ? [{
+        id: 'assistant-block', page_id: 'assistant-page', type: 'paragraph', position: 0,
+        content: { text: 'Grounded assistant evidence' }, version: 1,
+        created_at: pages[0].created_at, updated_at: pages[0].updated_at,
+      }] : [],
+    }))
+    apiMocks.listPageFiles.mockResolvedValue({ items: [] })
+    renderApp()
+
+    await user.click(await screen.findByRole('button', { name: 'Simulate assistant source' }))
+
+    expect(await screen.findByRole('textbox', { name: 'Page title' })).toHaveValue('Assistant evidence page')
+    const pageContent = await screen.findByRole('list', { name: 'Page content' })
+    expect(within(pageContent).getByRole('listitem')).toHaveClass('is-highlighted')
+    expect(within(pageContent).getByRole('listitem')).toHaveAttribute('data-block-id', 'assistant-block')
   })
 
   it('keeps related exploration on the current page during rapid navigation', async () => {

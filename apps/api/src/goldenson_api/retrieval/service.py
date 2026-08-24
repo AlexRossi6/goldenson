@@ -13,6 +13,37 @@ from goldenson_api.services.knowledge_service import KnowledgeService
 from goldenson_api.services.page_service import PageService
 
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+", re.IGNORECASE)
+_QUERY_STOP_WORDS = {
+    "a",
+    "about",
+    "an",
+    "and",
+    "are",
+    "do",
+    "does",
+    "for",
+    "from",
+    "how",
+    "in",
+    "is",
+    "it",
+    "me",
+    "my",
+    "of",
+    "on",
+    "please",
+    "the",
+    "this",
+    "to",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+    "with",
+    "workspace",
+}
 
 
 class RetrievedSource(BaseModel):
@@ -42,6 +73,7 @@ class RelatedContentResult(BaseModel):
 
 
 _SEMANTIC_WEIGHT = 0.55
+_SEMANTIC_MIN_SCORE = 0.35
 _KEYWORD_WEIGHT = 0.45
 _TITLE_BONUS = 0.25
 _SOURCE_BONUS = {"page": 0.05, "block": 0.02, "file": 0.0}
@@ -51,7 +83,10 @@ _RELATED_PASSAGE_LIMIT = 8
 
 
 def _keyword_score(query: str, title: str, text: str) -> float:
-    query_tokens = {token.lower() for token in _TOKEN_PATTERN.findall(query)}
+    raw_query_tokens = {token.lower() for token in _TOKEN_PATTERN.findall(query)}
+    query_tokens = raw_query_tokens - _QUERY_STOP_WORDS
+    if not query_tokens:
+        query_tokens = raw_query_tokens
     document_tokens = {token.lower() for token in _TOKEN_PATTERN.findall(f"{title} {text}")}
     if not query_tokens or not document_tokens:
         return 0.0
@@ -76,6 +111,17 @@ def _block_text(content: dict[str, object]) -> str:
             if isinstance(item, dict) and isinstance(item.get("text"), str):
                 parts.append(item["text"])
     return "\n".join(parts)
+
+
+def _source_sort_key(source: RetrievedSource) -> tuple[float, str, str, str, str, str]:
+    return (
+        -source.score,
+        source.kind,
+        source.title.casefold(),
+        source.snippet,
+        source.page_id or "",
+        source.block_id or source.file_id or "",
+    )
 
 
 class WorkspaceRetrievalService:
@@ -105,6 +151,8 @@ class WorkspaceRetrievalService:
         semantic_block_scores: dict[tuple[str, str], float] = {}
         semantic_snippets: dict[str, str] = {}
         for chunk, score in semantic_results:
+            if score < _SEMANTIC_MIN_SCORE:
+                continue
             semantic_scores[chunk.page_id] = max(semantic_scores.get(chunk.page_id, 0.0), score)
             semantic_snippets.setdefault(chunk.page_id, chunk.text)
             if chunk.block_id is not None:
@@ -171,17 +219,31 @@ class WorkspaceRetrievalService:
                     score=file_score * _KEYWORD_WEIGHT + _SOURCE_BONUS["file"],
                 )
 
-        sources = sorted(
+        ranked_sources = sorted(
             candidates.values(),
-            key=lambda source: (
-                -source.score,
-                source.kind,
-                source.title.casefold(),
-                source.snippet,
-                source.page_id or "",
-                source.block_id or source.file_id or "",
-            ),
-        )[:limit]
+            key=_source_sort_key,
+        )
+        block_evidence = {
+            (source.page_id, source.snippet): source.score
+            for source in ranked_sources
+            if source.kind == "block"
+        }
+        duplicate_page_scores = {
+            (source.page_id, source.snippet): source.score
+            for source in ranked_sources
+            if source.kind == "page" and (source.page_id, source.snippet) in block_evidence
+        }
+        compacted_sources = []
+        for source in ranked_sources:
+            evidence_key = (source.page_id, source.snippet)
+            if source.kind == "page" and evidence_key in block_evidence:
+                continue
+            if source.kind == "block" and evidence_key in duplicate_page_scores:
+                source = source.model_copy(
+                    update={"score": max(source.score, duplicate_page_scores[evidence_key])}
+                )
+            compacted_sources.append(source)
+        sources = sorted(compacted_sources, key=_source_sort_key)[:limit]
         context_parts = [
             f"SOURCE {index + 1}: {source.title}\n{source.snippet}"
             for index, source in enumerate(sources)

@@ -84,7 +84,8 @@ describe('AssistantPanel', () => {
 
     expect(screen.getByText('What am I working on?')).toBeInTheDocument()
     expect(screen.getByText('You are comparing Ollama and llama.cpp.')).toBeInTheDocument()
-    expect(screen.getByText('In page · Ollama notes')).toBeInTheDocument()
+    expect(screen.getByText('In page')).toBeInTheDocument()
+    expect(screen.getByText('Ollama notes')).toBeInTheDocument()
     expect(question).toHaveValue('')
     await user.click(screen.getByRole('button', { name: 'Local AI' }))
     expect(onOpenSource).toHaveBeenCalledWith(expect.objectContaining({
@@ -158,6 +159,13 @@ describe('AssistantPanel', () => {
     apiMocks.streamAgentRun.mockImplementation((_workspaceId, _message, onEvent, signal) => {
       capturedSignal = signal
       onEvent({ type: 'run', run_id: 'run-1' })
+      onEvent({
+        type: 'sources',
+        sources: [{
+          kind: 'block', title: 'Local AI', snippet: 'Ollama notes', page_id: 'page-1',
+          block_id: 'block-1', file_id: null, score: 1,
+        }],
+      })
       return new Promise<void>(() => undefined)
     })
     apiMocks.cancelAgentRun.mockResolvedValue(undefined)
@@ -172,6 +180,26 @@ describe('AssistantPanel', () => {
     await waitFor(() => expect(capturedSignal?.aborted).toBe(true))
     expect(apiMocks.cancelAgentRun).toHaveBeenCalledWith('workspace-1', 'run-1')
     expect(screen.getByText('Cancelled.')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Sources' })).not.toBeInTheDocument()
+  })
+
+  it('marks a partial answer as cancelled instead of leaving it looking complete', async () => {
+    const user = userEvent.setup()
+    apiMocks.streamAgentRun.mockImplementation((_workspaceId, _message, onEvent) => {
+      onEvent({ type: 'run', run_id: 'run-1' })
+      onEvent({ type: 'text', content: 'Based on the available notes,' })
+      return new Promise<void>(() => undefined)
+    })
+    apiMocks.cancelAgentRun.mockResolvedValue(undefined)
+    render(<AssistantPanel workspaceId="workspace-1" onOpenSource={vi.fn()} />)
+
+    const question = screen.getByLabelText('Ask the workspace assistant')
+    await waitFor(() => expect(question).toBeEnabled())
+    await user.type(question, 'Long summary')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }))
+
+    expect(screen.getByText(/Based on the available notes,\s+Response cancelled\./)).toBeInTheDocument()
   })
 
   it('shows active progress while the local model is preparing an answer', async () => {
@@ -190,8 +218,36 @@ describe('AssistantPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('Searching your workspace')
-    callback.send?.({ type: 'sources', sources: [] })
+    callback.send?.({
+      type: 'sources',
+      sources: [{
+        kind: 'block', title: 'Local AI', snippet: 'Ollama notes', page_id: 'page-1',
+        block_id: 'block-1', file_id: null, score: 1,
+      }],
+    })
     expect(await screen.findByRole('status')).toHaveTextContent('Thinking')
+    expect(screen.queryByRole('button', { name: 'Local AI' })).not.toBeInTheDocument()
+    callback.send?.({ type: 'text', content: 'The notes compare local runtimes.' })
+    expect(await screen.findByRole('button', { name: 'Local AI' })).toBeInTheDocument()
+  })
+
+  it('shows a safe error and remains ready for another question', async () => {
+    const user = userEvent.setup()
+    apiMocks.streamAgentRun.mockImplementation(async (_workspaceId, _message, onEvent) => {
+      onEvent({ type: 'error', message: 'The local agent could not complete this request.' })
+      onEvent({ type: 'done', status: 'failed' })
+    })
+    render(<AssistantPanel workspaceId="workspace-1" onOpenSource={vi.fn()} />)
+
+    const question = screen.getByLabelText('Ask the workspace assistant')
+    await waitFor(() => expect(question).toBeEnabled())
+    await user.type(question, 'Summarize my notes')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The local agent could not complete this request.',
+    )
+    expect(question).toBeEnabled()
   })
 
   it('does not submit while an input method is composing text', async () => {

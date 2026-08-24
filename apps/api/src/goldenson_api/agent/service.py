@@ -43,6 +43,10 @@ logger = logging.getLogger(__name__)
 _cancel_events: dict[str, asyncio.Event] = {}
 _active_run_ids: set[str] = set()
 _TERMINAL_STATUSES = {"completed", "cancelled", "failed", "timed_out"}
+_INSUFFICIENT_EVIDENCE_ANSWER = (
+    "I couldn't find enough information in your workspace to answer that confidently. "
+    "Try adding relevant notes or searching for a different term."
+)
 
 
 class CircuitBreakerError(RuntimeError):
@@ -131,6 +135,16 @@ def _deserialize_messages(messages: list[dict[str, object]]) -> list[ChatMessage
 
 def _is_simple_create_page_request(request: str) -> bool:
     return _SIMPLE_CREATE_PAGE_PATTERN.fullmatch(request) is not None
+
+
+def _contains_workspace_evidence(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(_contains_workspace_evidence(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_workspace_evidence(item) for item in value)
+    if isinstance(value, str):
+        return bool(value.strip())
+    return value is not None
 
 
 def _simple_create_page_title(request: str) -> str | None:
@@ -339,6 +353,7 @@ class AgentService:
             if run.remaining_seconds <= 0:
                 raise TimeoutError
             async with asyncio.timeout(run.remaining_seconds):
+                direct_answer_requires_evidence = False
                 if request is not None:
                     retrieval_started = time.monotonic()
                     if _is_simple_create_page_request(request):
@@ -349,6 +364,7 @@ class AgentService:
                         retrieval = await WorkspaceRetrievalService(self._session).search(
                             run.workspace_id, request
                         )
+                    direct_answer_requires_evidence = not retrieval.sources
                     logger.debug(
                         "agent lifecycle run=%s stage=retrieval duration_ms=%.1f skipped=%s",
                         run.id,
@@ -362,11 +378,19 @@ class AgentService:
                     safe_request = _sanitize_text(request)
                     safe_context = _sanitize_text(retrieval.context)
                     system_prompt = (
-                        "You are GoldenSon's local workspace assistant. Use only the supplied "
-                        "retrieved context and validated tools. Never invent sources. Do not "
+                        "You are GoldenSon's local workspace assistant. For workspace-specific "
+                        "claims, use only the supplied retrieved context or results returned by "
+                        "validated tools. Synthesize relevant facts across multiple SOURCE blocks "
+                        "when needed. If the evidence answers only part of the request, explain "
+                        "what is supported and what remains unknown. Never fill workspace evidence "
+                        "gaps with assumptions or general knowledge, and never imply that missing "
+                        "information was found. The application attaches the actual retrieved "
+                        "sources, so do not invent citations or source references. Do not mention "
+                        "retrieval scores, embeddings, vectors, or provider internals. Do not "
                         "request secrets, paths, SQL, shell commands, environment variables, or "
                         "arbitrary URLs. For a mutation, call exactly one tool; the application "
-                        "will request approval. Keep answers concise.\n\n"
+                        "will request approval. Keep answers concise and use plain text without "
+                        "Markdown formatting.\n\n"
                         f"RETRIEVED WORKSPACE CONTEXT:\n"
                         f"{safe_context or 'No relevant content found.'}"
                     )
@@ -416,6 +440,7 @@ class AgentService:
                     cancel_event,
                     lifecycle_started=lifecycle_started,
                     initial_response=initial_response,
+                    direct_answer_requires_evidence=direct_answer_requires_evidence,
                 ):
                     yield event
         except asyncio.CancelledError:
@@ -467,6 +492,7 @@ class AgentService:
         *,
         lifecycle_started: float | None = None,
         initial_response: LLMResponse | None = None,
+        direct_answer_requires_evidence: bool = False,
     ) -> AsyncIterator[dict[str, object]]:
         executor = AgentToolExecutor(self._session, run.workspace_id)
 
@@ -504,6 +530,8 @@ class AgentService:
                 await self._finish_run(run.id, "cancelled")
                 yield {"type": "done", "status": "cancelled"}
                 return
+            if direct_answer_requires_evidence and not response.tool_calls:
+                response = response.model_copy(update={"content": _INSUFFICIENT_EVIDENCE_ANSWER})
             messages.append(
                 ChatMessage(
                     role="assistant",
@@ -574,6 +602,8 @@ class AgentService:
                     executor.execute(call.name, arguments),
                     timeout=self._tool_timeout_seconds,
                 )
+                if _contains_workspace_evidence(result):
+                    direct_answer_requires_evidence = False
                 sanitized_result = sanitize_for_audit(result)
                 assert isinstance(sanitized_result, dict)
                 await self._audit.finish_tool_call(

@@ -35,6 +35,7 @@ from goldenson_api.schemas.workspace import WorkspaceCreate
 from goldenson_api.services.block_service import BlockService
 from goldenson_api.services.errors import BadRequestError, NotFoundError
 from goldenson_api.services.file_service import FileService
+from goldenson_api.services.knowledge_service import KnowledgeService
 from goldenson_api.services.page_service import PageService
 from goldenson_api.services.workspace_service import WorkspaceService
 
@@ -272,22 +273,168 @@ async def test_simple_question_returns_sources_answer_and_completion(
     session: AsyncSession,
 ) -> None:
     workspace_id, _ = await seed_workspace(session)
-    provider = FakeProvider([LLMResponse(content="This workspace compares local AI runtimes.")])
+    provider = FakeProvider([LLMResponse(content="Your notes compare Ollama with llama.cpp.")])
     events = await collect_events(
         AgentService(
             session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
         ),
         workspace_id,
-        "What is this workspace about?",
+        "What do my Ollama notes compare?",
     )
 
     sources = next(event["sources"] for event in events if event.get("type") == "sources")
-    assert isinstance(sources, list)
-    assert "local AI runtimes" in "".join(
+    assert isinstance(sources, list) and sources
+    assert "Ollama with llama.cpp" in "".join(
         str(event.get("content", "")) for event in events if event.get("type") == "text"
     )
     assert len(provider.calls) == 1
+    assert "Compare Ollama with llama.cpp for local inference." in provider.calls[0][0].content
     assert events[-1] == {"type": "done", "status": "completed"}
+
+
+@pytest.mark.asyncio
+async def test_question_without_retrieved_evidence_rejects_unsupported_provider_answer(
+    session: AsyncSession,
+) -> None:
+    workspace_id, _ = await seed_workspace(session)
+    provider = FakeProvider([LLMResponse(content="Your workspace uses Kubernetes in production.")])
+
+    events = await collect_events(
+        AgentService(
+            session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
+        ),
+        workspace_id,
+        "How is Kubernetes deployed?",
+    )
+
+    sources = next(event["sources"] for event in events if event.get("type") == "sources")
+    answer = "".join(
+        str(event.get("content", "")) for event in events if event.get("type") == "text"
+    )
+    assert sources == []
+    assert "Kubernetes" not in answer
+    assert "couldn't find enough information in your workspace" in answer
+    assert events[-1] == {"type": "done", "status": "completed"}
+
+
+@pytest.mark.asyncio
+async def test_empty_read_tool_result_keeps_insufficient_evidence_guard(
+    session: AsyncSession,
+) -> None:
+    workspace_id, _ = await seed_workspace(session)
+    provider = FakeProvider(
+        [
+            LLMResponse(
+                tool_calls=[
+                    LLMToolCall(
+                        id="search-missing",
+                        name="search_workspace",
+                        arguments={"query": "lunar mining policy", "limit": 6},
+                    )
+                ]
+            ),
+            LLMResponse(content="Your workspace requires helium-3 mining permits."),
+        ]
+    )
+
+    events = await collect_events(
+        AgentService(
+            session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
+        ),
+        workspace_id,
+        "What is the lunar mining policy?",
+    )
+
+    answer = "".join(
+        str(event.get("content", "")) for event in events if event.get("type") == "text"
+    )
+    assert len(provider.calls) == 2
+    assert "helium-3" not in answer
+    assert "couldn't find enough information in your workspace" in answer
+
+
+@pytest.mark.asyncio
+async def test_multi_page_question_supplies_bounded_context_matching_emitted_sources(
+    session: AsyncSession,
+) -> None:
+    workspace_id, first_page_id = await seed_workspace(session)
+    second_page = await PageService(session).create_page(
+        PageCreate(
+            workspace_id=workspace_id,
+            parent_page_id=None,
+            title="Backup policy",
+            position=1,
+        )
+    )
+    await BlockService(session).create_block(
+        BlockCreate(
+            page_id=second_page.id,
+            type="paragraph",
+            position=0,
+            content={"text": "SQLite backups are retained locally for thirty days."},
+        )
+    )
+    await session.commit()
+    provider = FakeProvider(
+        [
+            LLMResponse(
+                content="The notes compare local runtimes and retain backups for thirty days."
+            )
+        ]
+    )
+
+    events = await collect_events(
+        AgentService(
+            session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
+        ),
+        workspace_id,
+        "Summarize Ollama inference and SQLite backup retention.",
+    )
+
+    raw_sources = next(event["sources"] for event in events if event.get("type") == "sources")
+    assert isinstance(raw_sources, list)
+    sources = [source for source in raw_sources if isinstance(source, dict)]
+    assert {source.get("page_id") for source in sources} >= {first_page_id, second_page.id}
+    assert len(sources) <= 6
+    system_prompt = provider.calls[0][0].content
+    assert "Synthesize relevant facts across multiple SOURCE blocks" in system_prompt
+    assert "what remains unknown" in system_prompt
+    assert "plain text without Markdown formatting" in system_prompt
+    assert all(str(source["snippet"]) in system_prompt for source in sources)
+
+
+@pytest.mark.asyncio
+async def test_lexical_fallback_still_supplies_grounded_answer_context(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace_id, _ = await seed_workspace(session)
+
+    async def semantic_unavailable(
+        _service: KnowledgeService,
+        _workspace_id: str,
+        _query: str,
+        limit: int = 6,
+    ) -> list[tuple[object, float]]:
+        return []
+
+    monkeypatch.setattr(KnowledgeService, "semantic_search", semantic_unavailable)
+    provider = FakeProvider([LLMResponse(content="The notes compare Ollama with llama.cpp.")])
+
+    events = await collect_events(
+        AgentService(
+            session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
+        ),
+        workspace_id,
+        "What do the Ollama inference notes compare?",
+    )
+
+    sources = next(event["sources"] for event in events if event.get("type") == "sources")
+    assert isinstance(sources, list) and sources
+    assert any(
+        isinstance(source, dict) and source.get("block_id") is not None for source in sources
+    )
+    assert "Compare Ollama with llama.cpp" in provider.calls[0][0].content
 
 
 @pytest.mark.asyncio

@@ -746,39 +746,13 @@ label {
 
 .assistant-sources ul {
   display: grid;
-  gap: 0.4rem;
   margin: 0;
   padding: 0;
+  border-bottom: 1px solid var(--line);
   list-style: none;
 }
 
-.assistant-sources li {
-  display: grid;
-  gap: 0.5rem;
-}
-
-.assistant-sources span {
-  color: var(--muted-ink);
-  font-family: 'DM Mono', 'Courier New', monospace;
-  font-size: 0.65rem;
-  line-height: 1.4;
-}
-
-.source-link {
-  padding: 0;
-  overflow: hidden;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  text-align: left;
-  text-decoration: underline;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.source-link:disabled {
+.evidence-result:disabled {
   color: var(--muted-ink);
   cursor: default;
 }

@@ -10,6 +10,7 @@ import {
   type AgentWorkspaceChange,
 } from '../../api/agent'
 import { LocalAIManager } from '../local-ai/LocalAIManager'
+import { EvidenceResult } from '../ui/EvidenceResult'
 
 type AssistantPanelProps = {
   workspaceId: string
@@ -21,6 +22,12 @@ type ConversationMessage = {
   role: 'user' | 'assistant'
   content: string
   sources?: AgentSource[]
+}
+
+function sourceLabel(source: AgentSource): string {
+  if (source.kind === 'block') return 'In page'
+  if (source.kind === 'file') return 'File'
+  return 'Page'
 }
 
 export function AssistantPanel({ workspaceId, onOpenSource, onWorkspaceChanged }: AssistantPanelProps) {
@@ -115,8 +122,15 @@ export function AssistantPanel({ workspaceId, onOpenSource, onWorkspaceChanged }
     setProgressMessage(null)
     setConversation((current) => {
       const last = current[current.length - 1]
-      if (!last || last.role !== 'assistant' || last.content) return current
-      return [...current.slice(0, -1), { ...last, content: 'Cancelled.' }]
+      if (!last || last.role !== 'assistant') return current
+      const hasPartialAnswer = Boolean(last.content)
+      const content = hasPartialAnswer
+        ? `${last.content}\n\nResponse cancelled.`
+        : 'Cancelled.'
+      return [
+        ...current.slice(0, -1),
+        { ...last, content, sources: hasPartialAnswer ? last.sources : undefined },
+      ]
     })
   }
 
@@ -184,16 +198,19 @@ export function AssistantPanel({ workspaceId, onOpenSource, onWorkspaceChanged }
           <article className={`assistant-message assistant-message-${message.role}`} key={`${message.role}-${index}`}>
             <span className="assistant-message-label">{message.role === 'user' ? 'You' : 'Assistant'}</span>
             {message.content && <p>{message.content}</p>}
-            {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
+            {message.role === 'assistant' && message.content && message.sources && message.sources.length > 0 && (
               <section className="assistant-sources" aria-label="Sources">
                 <h3>Sources</h3>
                 <ul>
                   {message.sources.map((source) => (
                     <li key={`${source.kind}-${source.block_id ?? source.file_id ?? source.page_id}`}>
-                      <button type="button" className="source-link" disabled={!source.page_id && !source.file_id} onClick={() => onOpenSource(source)}>
-                        {source.title}
-                      </button>
-                      <span>{source.kind === 'block' ? 'In page' : source.kind === 'file' ? 'File' : 'Page'} · {source.snippet}</span>
+                      <EvidenceResult
+                        label={sourceLabel(source)}
+                        title={source.title}
+                        preview={source.snippet}
+                        onOpen={() => onOpenSource(source)}
+                        disabled={!source.page_id && !source.file_id}
+                      />
                     </li>
                   ))}
                 </ul>

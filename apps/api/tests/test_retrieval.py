@@ -78,10 +78,23 @@ async def test_hybrid_search_preserves_sources_and_prioritizes_exact_title() -> 
     result = await service.search("w1", "sqlite-vec", limit=5)
 
     assert result.sources[0].page_id == "p1"
-    assert result.sources[0].kind == "page"
+    assert result.sources[0].kind == "block"
     assert any(source.block_id == "b1" for source in result.sources)
     assert any(source.file_id == "f1" for source in result.sources)
+    assert not any(source.kind == "page" and source.page_id == "p1" for source in result.sources)
     assert "sqlite-vec" in result.context
+
+
+@pytest.mark.asyncio
+async def test_exact_page_and_block_duplicate_prefers_block_provenance() -> None:
+    page = SimpleNamespace(id="p1", title="Launch notes", workspace_id="w1")
+    block = SimpleNamespace(id="b1", content={"text": "Starling launches in October."})
+    service = service_with([page], {"p1": [block]}, [])
+
+    result = await service.search("w1", "Starling launches October")
+
+    assert [(source.kind, source.block_id) for source in result.sources] == [("block", "b1")]
+    assert result.context.count("Starling launches in October.") == 1
 
 
 @pytest.mark.asyncio
@@ -102,6 +115,29 @@ async def test_empty_query_and_irrelevant_sources_are_excluded() -> None:
 
     assert (await service.search("w1", "   ")).sources == []
     assert (await service.search("w1", "missing term")).sources == []
+
+
+@pytest.mark.asyncio
+async def test_question_words_do_not_create_irrelevant_lexical_evidence() -> None:
+    page = SimpleNamespace(id="p1", title="Garden plan", workspace_id="w1")
+    block = SimpleNamespace(id="b1", content={"text": "This is the spring planting schedule."})
+    service = service_with([page], {"p1": [block]}, [])
+
+    result = await service.search("w1", "How is Kubernetes deployed in the workspace?")
+
+    assert result.sources == []
+    assert result.context == ""
+
+
+@pytest.mark.asyncio
+async def test_weak_semantic_match_is_not_treated_as_workspace_evidence() -> None:
+    page = SimpleNamespace(id="p1", title="Garden plan", workspace_id="w1")
+    semantic_record = SimpleNamespace(page_id="p1", block_id=None, text="Spring planting")
+    service = service_with([page], {"p1": []}, [], [(semantic_record, 0.2)])
+
+    result = await service.search("w1", "Kubernetes deployment")
+
+    assert result.sources == []
 
 
 @pytest.mark.asyncio
