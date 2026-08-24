@@ -228,13 +228,77 @@ describe('App product language', () => {
     await user.type(await screen.findByRole('searchbox', { name: 'Search workspace' }), 'matching paragraph')
     await user.click(screen.getByRole('button', { name: 'Search' }))
     const search = await screen.findByRole('region', { name: 'Workspace search' })
-    await user.click(await screen.findByRole('button', { name: /Matching paragraph/ }))
+    await user.click(await within(search).findByRole('button', { name: 'Second page' }))
 
     expect(search).toBeInTheDocument()
     expect(await screen.findByRole('textbox', { name: 'Page title' })).toHaveValue('Second page')
     const pageContent = await screen.findByRole('list', { name: 'Page content' })
     expect(within(pageContent).getByRole('listitem')).toHaveClass('is-highlighted')
     expect(within(pageContent).getByRole('listitem')).toHaveAttribute('data-block-id', 'block-2')
+  })
+
+  it('keeps related exploration on the current page during rapid navigation', async () => {
+    const user = userEvent.setup()
+    const pages = [
+      {
+        id: 'page-a', workspace_id: 'workspace-1', parent_page_id: null, title: 'Page A', position: 0, version: 1,
+        created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'page-b', workspace_id: 'workspace-1', parent_page_id: null, title: 'Page B', position: 1, version: 1,
+        created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'page-c', workspace_id: 'workspace-1', parent_page_id: null, title: 'Page C', position: 2, version: 1,
+        created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+      },
+    ]
+    let resolvePageA: ((value: { items: Array<{ page_id: string; title: string; snippet: string; block_id: string | null }> }) => void) | undefined
+    apiMocks.listWorkspaces.mockResolvedValue({
+      items: [{ id: 'workspace-1', name: 'My Workspace', created_at: pages[0].created_at, updated_at: pages[0].updated_at }],
+    })
+    apiMocks.listPages.mockResolvedValue({ items: pages })
+    apiMocks.getPage.mockImplementation((pageId: string) => Promise.resolve(pages.find((page) => page.id === pageId)))
+    apiMocks.listBlocks.mockImplementation((pageId: string) => Promise.resolve({
+      items: pageId === 'page-c' ? [{
+        id: 'block-c', page_id: 'page-c', type: 'paragraph', position: 0,
+        content: { text: 'Evidence on page C' }, version: 1,
+        created_at: pages[0].created_at, updated_at: pages[0].updated_at,
+      }] : [],
+    }))
+    apiMocks.listPageFiles.mockResolvedValue({ items: [] })
+    apiMocks.getRelatedPages.mockImplementation((pageId: string) => {
+      if (pageId === 'page-a') {
+        return new Promise((resolve) => { resolvePageA = resolve })
+      }
+      if (pageId === 'page-b') {
+        return Promise.resolve({
+          items: [{ page_id: 'page-c', title: 'Page C', snippet: 'Evidence on page C', block_id: 'block-c' }],
+        })
+      }
+      return Promise.resolve({
+        items: [{ page_id: 'page-a', title: 'Page A', snippet: 'Evidence on page A', block_id: null }],
+      })
+    })
+    renderApp()
+
+    expect(await screen.findByRole('textbox', { name: 'Page title' })).toHaveValue('Page A')
+    await waitFor(() => expect(resolvePageA).toBeTypeOf('function'))
+    await user.click(screen.getByRole('button', { name: 'Page B' }))
+    expect(await screen.findByRole('textbox', { name: 'Page title' })).toHaveValue('Page B')
+    const related = await screen.findByRole('complementary', { name: 'Related content' })
+    expect(await within(related).findByRole('button', { name: 'Page C' })).toBeInTheDocument()
+
+    resolvePageA?.({
+      items: [{ page_id: 'stale-page', title: 'Stale A result', snippet: 'Old evidence', block_id: null }],
+    })
+    await waitFor(() => expect(screen.queryByText('Stale A result')).not.toBeInTheDocument())
+
+    await user.click(within(related).getByRole('button', { name: 'Page C' }))
+    expect(await screen.findByRole('textbox', { name: 'Page title' })).toHaveValue('Page C')
+    const pageContent = await screen.findByRole('list', { name: 'Page content' })
+    expect(within(pageContent).getByRole('listitem')).toHaveClass('is-highlighted')
+    expect(await within(screen.getByRole('complementary', { name: 'Related content' })).findByRole('button', { name: 'Page A' })).toBeInTheDocument()
   })
 
   it('opens a file result through its constrained download URL', async () => {
@@ -303,7 +367,7 @@ describe('App product language', () => {
 
     await user.type(await screen.findByRole('searchbox', { name: 'Search workspace' }), 'temporary')
     await user.click(screen.getByRole('button', { name: 'Search' }))
-    expect(await screen.findByRole('button', { name: /temporary\.txt.*temporary content/i })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'temporary.txt' })).toBeInTheDocument()
     const files = screen.getByRole('region', { name: 'Workspace files' })
     await user.click(await within(files).findByRole('button', { name: 'Delete temporary.txt' }))
     await user.click(await screen.findByRole('button', { name: 'Remove file' }))

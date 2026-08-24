@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react'
 
 import { searchWorkspace } from '../../api/workspaces'
 import type { RetrievedSource } from '../../types/api'
+import { EvidenceResult } from '../ui/EvidenceResult'
 
 type WorkspaceSearchProps = {
   workspaceId: string
@@ -69,11 +70,12 @@ export function WorkspaceSearch({ workspaceId, onOpenSource }: WorkspaceSearchPr
             <ul className="search-result-list">
               {resultsQuery.data.sources.map((source) => (
                 <li key={`${source.kind}-${source.block_id ?? source.file_id ?? source.page_id}`}>
-                  <button type="button" className="search-result" onClick={() => onOpenSource(source)}>
-                    <span className="search-result-meta">{sourceLabel(source)}</span>
-                    <strong>{source.title}</strong>
-                    <span className="search-result-preview">{source.snippet}</span>
-                  </button>
+                  <EvidenceResult
+                    label={sourceLabel(source)}
+                    title={source.title}
+                    preview={source.snippet}
+                    onOpen={() => onOpenSource(source)}
+                  />
                 </li>
               ))}
             </ul>

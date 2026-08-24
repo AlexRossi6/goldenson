@@ -4,6 +4,7 @@ import type { Block, FileMetadata, Page } from '../../types/api'
 import type { PageKnowledge, RelatedPage } from '../../api/knowledge'
 import { BlockEditor } from '../blocks/BlockEditor'
 import { FileArea } from '../files/FileArea'
+import { EvidenceResult } from '../ui/EvidenceResult'
 
 type PageEditorProps = {
   page: Page
@@ -147,8 +148,12 @@ export function PageEditor({
             <ul className="related-list">
               {relatedPages.map((related) => (
                 <li key={related.page_id}>
-                  <button type="button" onClick={() => onSelectPage?.(related.page_id, related.block_id)}>{related.title}</button>
-                  <span>{related.snippet}</span>
+                  <EvidenceResult
+                    label={related.block_id ? 'Connected passage' : 'Related page'}
+                    title={related.title}
+                    preview={related.snippet}
+                    onOpen={() => onSelectPage?.(related.page_id, related.block_id)}
+                  />
                 </li>
               ))}
             </ul>

@@ -142,7 +142,7 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
-.search-result {
+.evidence-result {
   display: grid;
   gap: 0.18rem;
   width: 100%;
@@ -156,21 +156,21 @@ body {
   cursor: pointer;
 }
 
-.search-result:hover,
-.search-result:focus-visible {
+.evidence-result:hover,
+.evidence-result:focus-visible {
   padding-inline: 0.45rem;
   outline: none;
   background: rgba(255, 255, 255, 0.62);
 }
 
-.search-result-meta {
+.evidence-result-meta {
   color: var(--muted-ink);
   font-family: 'DM Mono', 'Courier New', monospace;
   font-size: 0.65rem;
   text-transform: uppercase;
 }
 
-.search-result-preview {
+.evidence-result-preview {
   display: -webkit-box;
   overflow: hidden;
   color: var(--muted-ink);
@@ -354,8 +354,7 @@ textarea {
   font-size: 0.9rem;
 }
 
-.knowledge-status,
-.related-list span {
+.knowledge-status {
   color: var(--muted-ink);
   font-family: 'DM Mono', monospace;
   font-size: 0.7rem;
@@ -363,10 +362,7 @@ textarea {
 
 .concept-list { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .concept-pill { padding: 0.18rem 0.45rem; border: 1px solid var(--line); font-size: 0.75rem; }
-.related-list { display: grid; gap: 0.45rem; margin: 0; padding: 0; list-style: none; }
-.related-list li { display: grid; gap: 0.1rem; }
-.related-list button { width: fit-content; padding: 0; border: 0; background: transparent; color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
-.related-list button:hover { color: var(--coral); }
+.related-list { display: grid; margin: 0; padding: 0; border-bottom: 1px solid var(--line); list-style: none; }
 
 textarea {
   min-height: 120px;
