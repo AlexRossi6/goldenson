@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from goldenson_api.services.block_service import BlockService
+from goldenson_api.services.errors import NotFoundError
 from goldenson_api.services.file_service import FileService
 from goldenson_api.services.knowledge_service import KnowledgeService
 from goldenson_api.services.page_service import PageService
@@ -29,10 +30,24 @@ class RetrievalResult(BaseModel):
     sources: list[RetrievedSource]
 
 
+class RelatedContentItem(BaseModel):
+    page_id: str
+    title: str
+    snippet: str
+    block_id: str | None = None
+
+
+class RelatedContentResult(BaseModel):
+    items: list[RelatedContentItem]
+
+
 _SEMANTIC_WEIGHT = 0.55
 _KEYWORD_WEIGHT = 0.45
 _TITLE_BONUS = 0.25
 _SOURCE_BONUS = {"page": 0.05, "block": 0.02, "file": 0.0}
+_RELATED_MIN_SCORE = 0.25
+_RELATED_PASSAGE_LENGTH = 1200
+_RELATED_PASSAGE_LIMIT = 8
 
 
 def _keyword_score(query: str, title: str, text: str) -> float:
@@ -70,7 +85,14 @@ class WorkspaceRetrievalService:
         self._files = FileService(session)
         self._knowledge = KnowledgeService(session)
 
-    async def search(self, workspace_id: str, query: str, limit: int = 6) -> RetrievalResult:
+    async def search(
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int = 6,
+        *,
+        exclude_page_id: str | None = None,
+    ) -> RetrievalResult:
         if not query.strip() or limit <= 0:
             return RetrievalResult(context="", sources=[])
 
@@ -90,6 +112,8 @@ class WorkspaceRetrievalService:
                 semantic_block_scores[key] = max(semantic_block_scores.get(key, 0.0), score)
 
         for page in pages:
+            if page.id == exclude_page_id:
+                continue
             blocks = await self._blocks.list_blocks(page.id)
             page_body = "\n".join(_block_text(block.content) for block in blocks)
             keyword_score = _keyword_score(query, page.title, page_body)
@@ -133,6 +157,8 @@ class WorkspaceRetrievalService:
                     )
 
         for file_metadata in await self._files.list_workspace_files(workspace_id):
+            if exclude_page_id is not None and file_metadata.page_id == exclude_page_id:
+                continue
             searchable_text = getattr(file_metadata, "search_text", None) or ""
             file_score = _keyword_score(query, file_metadata.name, searchable_text)
             if file_score > 0:
@@ -161,3 +187,67 @@ class WorkspaceRetrievalService:
             for index, source in enumerate(sources)
         ]
         return RetrievalResult(context="\n\n".join(context_parts)[:12000], sources=sources)
+
+    async def related(self, page_id: str, limit: int = 5) -> RelatedContentResult:
+        if limit <= 0:
+            return RelatedContentResult(items=[])
+        page = await self._pages.get_page(page_id)
+        if page is None:
+            raise NotFoundError("page not found")
+        blocks = await self._blocks.list_blocks(page.id)
+        passages = []
+        for passage in [page.title, *(_block_text(block.content) for block in blocks)]:
+            normalized = passage.strip()[:_RELATED_PASSAGE_LENGTH]
+            if len(_TOKEN_PATTERN.findall(normalized)) >= 2 and normalized not in passages:
+                passages.append(normalized)
+            if len(passages) == _RELATED_PASSAGE_LIMIT:
+                break
+        if not passages:
+            return RelatedContentResult(items=[])
+
+        by_page: dict[str, tuple[float, RetrievedSource, RetrievedSource | None]] = {}
+        for passage in passages:
+            result = await self.search(
+                page.workspace_id,
+                passage,
+                limit=max(limit * 8, 24),
+                exclude_page_id=page.id,
+            )
+            for source in result.sources:
+                if source.page_id is None or source.score < _RELATED_MIN_SCORE:
+                    continue
+                existing = by_page.get(source.page_id)
+                if existing is None:
+                    by_page[source.page_id] = (
+                        source.score,
+                        source,
+                        source if source.kind == "block" else None,
+                    )
+                    continue
+                score, strongest, block_evidence = existing
+                if source.score > score:
+                    score, strongest = source.score, source
+                if source.kind == "block" and (
+                    block_evidence is None or source.score > block_evidence.score
+                ):
+                    block_evidence = source
+                by_page[source.page_id] = (score, strongest, block_evidence)
+
+        items = []
+        for destination_page_id, (_, strongest, block_evidence) in sorted(
+            by_page.items(),
+            key=lambda item: (-item[1][0], item[0]),
+        )[:limit]:
+            evidence = block_evidence or strongest
+            destination = await self._pages.get_page(destination_page_id)
+            if destination is None:
+                continue
+            items.append(
+                RelatedContentItem(
+                    page_id=destination_page_id,
+                    title=destination.title,
+                    snippet=evidence.snippet,
+                    block_id=evidence.block_id,
+                )
+            )
+        return RelatedContentResult(items=items)

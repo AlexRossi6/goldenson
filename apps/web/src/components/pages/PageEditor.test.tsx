@@ -54,26 +54,26 @@ describe('PageEditor', () => {
   it('renders and navigates related pages', async () => {
     const user = userEvent.setup()
     const onSelectPage = vi.fn()
-    render(<PageEditor page={page} blocks={[]} attachments={[]} attachmentsLoading={false} attachmentsUploading={false} attachmentsError={null} busy={false} errorMessage={null} relatedPages={[{ page_id: 'p2', title: 'Local AI', reason: 'Similar topic' }]} onSelectPage={onSelectPage} onUpdatePage={vi.fn().mockResolvedValue(undefined)} onCreateBlock={vi.fn().mockResolvedValue(undefined)} onUpdateBlock={vi.fn().mockResolvedValue(undefined)} onDeleteBlock={vi.fn()} onRequestMove={vi.fn()} onRequestDelete={vi.fn()} onUploadAttachment={vi.fn().mockResolvedValue(undefined)} onDeleteAttachment={vi.fn()} />)
+    render(<PageEditor page={page} blocks={[]} attachments={[]} attachmentsLoading={false} attachmentsUploading={false} attachmentsError={null} busy={false} errorMessage={null} relatedPages={[{ page_id: 'p2', title: 'Local AI', snippet: 'Ollama serves local models on localhost.', block_id: 'b2' }]} onSelectPage={onSelectPage} onUpdatePage={vi.fn().mockResolvedValue(undefined)} onCreateBlock={vi.fn().mockResolvedValue(undefined)} onUpdateBlock={vi.fn().mockResolvedValue(undefined)} onDeleteBlock={vi.fn()} onRequestMove={vi.fn()} onRequestDelete={vi.fn()} onUploadAttachment={vi.fn().mockResolvedValue(undefined)} onDeleteAttachment={vi.fn()} />)
 
     await user.click(screen.getByRole('button', { name: 'Local AI' }))
-    expect(onSelectPage).toHaveBeenCalledWith('p2')
-    expect(screen.getByText('Similar topic')).toBeInTheDocument()
+    expect(onSelectPage).toHaveBeenCalledWith('p2', 'b2')
+    expect(screen.getByText('Ollama serves local models on localhost.')).toBeInTheDocument()
   })
 
   it('shows a retry action for stale knowledge', () => {
     const onRetryKnowledge = vi.fn()
     render(<PageEditor page={page} blocks={[]} attachments={[]} attachmentsLoading={false} attachmentsUploading={false} attachmentsError={null} busy={false} errorMessage={null} knowledge={{ status: 'stale', concepts: [] }} onRetryKnowledge={onRetryKnowledge} onUpdatePage={vi.fn().mockResolvedValue(undefined)} onCreateBlock={vi.fn().mockResolvedValue(undefined)} onUpdateBlock={vi.fn().mockResolvedValue(undefined)} onDeleteBlock={vi.fn()} onRequestMove={vi.fn()} onRequestDelete={vi.fn()} onUploadAttachment={vi.fn().mockResolvedValue(undefined)} onDeleteAttachment={vi.fn()} />)
 
-    expect(screen.getByText('Related content may be out of date.')).toBeInTheDocument()
+    expect(screen.getByText('Some connections may be missing.')).toBeInTheDocument()
     expect(screen.getByText('Refresh')).toBeInTheDocument()
   })
 
   it.each([
-    ['pending', 'Finding related content...'],
-    ['indexing', 'Finding related content...'],
+    ['pending', 'Connections are updating.'],
+    ['indexing', 'Connections are updating.'],
     ['ready', 'No related content found.'],
-    ['failed', 'Related content is unavailable.'],
+    ['failed', 'Some connections may be missing.'],
   ] as const)('shows the %s knowledge state', (status, label) => {
     render(<PageEditor page={page} blocks={[]} attachments={[]} attachmentsLoading={false} attachmentsUploading={false} attachmentsError={null} busy={false} errorMessage={null} knowledge={{ status, concepts: [] }} onRetryKnowledge={vi.fn()} onUpdatePage={vi.fn().mockResolvedValue(undefined)} onCreateBlock={vi.fn().mockResolvedValue(undefined)} onUpdateBlock={vi.fn().mockResolvedValue(undefined)} onDeleteBlock={vi.fn()} onRequestMove={vi.fn()} onRequestDelete={vi.fn()} onUploadAttachment={vi.fn().mockResolvedValue(undefined)} onDeleteAttachment={vi.fn()} />)
 

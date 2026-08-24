@@ -47,7 +47,7 @@ type PageEditorProps = {
   knowledge?: PageKnowledge
   onRetryKnowledge?: () => void
   onRetryRelated?: () => void
-  onSelectPage?: (pageId: string) => void
+  onSelectPage?: (pageId: string, blockId?: string | null) => void
 }
 
 export function PageEditor({
@@ -128,29 +128,32 @@ export function PageEditor({
         <aside className="related-content" aria-label="Related content">
           <div>
             <h3>Related content</h3>
-            {(relatedLoading || knowledge?.status === 'pending' || knowledge?.status === 'indexing') && <span className="knowledge-status">Finding related content...</span>}
+            {relatedLoading && <span className="knowledge-status">Finding related content...</span>}
             {relatedError && <>
               <span className="knowledge-status">Related content could not be loaded.</span>
               <button type="button" className="knowledge-retry" onClick={onRetryRelated}>Try again</button>
             </>}
             {(knowledge?.status === 'failed' || knowledge?.status === 'stale') && (
               <div className="knowledge-recovery">
-                <span className="knowledge-status">{knowledge.status === 'failed' ? 'Related content is unavailable.' : 'Related content may be out of date.'}</span>
+                <span className="knowledge-status">Some connections may be missing.</span>
                 <button type="button" className="knowledge-retry" onClick={onRetryKnowledge}>Refresh</button>
               </div>
+            )}
+            {(knowledge?.status === 'pending' || knowledge?.status === 'indexing') && !relatedLoading && (
+              <span className="knowledge-status">Connections are updating.</span>
             )}
           </div>
           {relatedPages.length > 0 && (
             <ul className="related-list">
               {relatedPages.map((related) => (
                 <li key={related.page_id}>
-                  <button type="button" onClick={() => onSelectPage?.(related.page_id)}>{related.title}</button>
-                  <span>{related.reason}</span>
+                  <button type="button" onClick={() => onSelectPage?.(related.page_id, related.block_id)}>{related.title}</button>
+                  <span>{related.snippet}</span>
                 </li>
               ))}
             </ul>
           )}
-          {!relatedLoading && !relatedError && knowledge?.status === 'ready' && relatedPages.length === 0 && (
+          {!relatedLoading && !relatedError && relatedPages.length === 0 && (
             <span className="knowledge-status">No related content found.</span>
           )}
         </aside>

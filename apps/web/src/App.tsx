@@ -48,6 +48,9 @@ function App() {
   const invalidateWorkspaceSearch = () => queryClient.invalidateQueries({
     queryKey: ['workspace-search', workspaceId],
   })
+  const invalidateRelatedContent = () => queryClient.invalidateQueries({
+    queryKey: ['related-pages'],
+  })
 
   const pagesQuery = useQuery({
     queryKey: ['pages', workspaceId],
@@ -112,6 +115,12 @@ function App() {
     refetchInterval: () => ['pending', 'indexing'].includes(knowledgeQuery.data?.status ?? '') ? 1000 : false,
   })
 
+  useEffect(() => {
+    if (!selectedPageId || !knowledgeQuery.data) return
+    if (!['ready', 'failed', 'stale'].includes(knowledgeQuery.data.status)) return
+    void queryClient.invalidateQueries({ queryKey: ['related-pages', selectedPageId] })
+  }, [knowledgeQuery.data, queryClient, selectedPageId])
+
   const reindexMutation = useMutation({
     mutationFn: reindexPage,
     onSuccess: async (_, pageId) => {
@@ -131,6 +140,7 @@ function App() {
         queryClient.invalidateQueries({ queryKey: ['files', workspaceId] }),
         queryClient.invalidateQueries({ queryKey: ['page-files'] }),
         queryClient.invalidateQueries({ queryKey: ['page-knowledge'] }),
+        invalidateRelatedContent(),
       ])
     },
   })
@@ -142,6 +152,7 @@ function App() {
         queryClient.invalidateQueries({ queryKey: ['files', workspaceId] }),
         queryClient.invalidateQueries({ queryKey: ['page-files'] }),
         queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] }),
+        invalidateRelatedContent(),
       ])
     },
   })
@@ -176,6 +187,7 @@ function App() {
         queryClient.invalidateQueries({ queryKey: ['pages', createdPage.workspace_id] }),
         queryClient.invalidateQueries({ queryKey: ['index-health', createdPage.workspace_id] }),
         invalidateWorkspaceSearch(),
+        invalidateRelatedContent(),
       ])
       setSelectedPageId(createdPage.id)
       setPageExpanded(createdPage.id, true)
@@ -196,7 +208,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['pages', updatedPage.workspace_id] })
       await queryClient.invalidateQueries({ queryKey: ['page', updatedPage.id] })
       await queryClient.invalidateQueries({ queryKey: ['page-knowledge', updatedPage.id] })
-      await queryClient.invalidateQueries({ queryKey: ['related-pages', updatedPage.id] })
+      await invalidateRelatedContent()
       await queryClient.invalidateQueries({ queryKey: ['index-health', updatedPage.workspace_id] })
       await invalidateWorkspaceSearch()
     },
@@ -218,6 +230,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['files', workspaceId] })
       await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
       await invalidateWorkspaceSearch()
+      await invalidateRelatedContent()
       setSelectedPageId(null)
       setErrorMessage(null)
     },
@@ -243,7 +256,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['blocks', createdBlock.page_id] })
       await queryClient.invalidateQueries({ queryKey: ['page', createdBlock.page_id] })
       await queryClient.invalidateQueries({ queryKey: ['page-knowledge', createdBlock.page_id] })
-      await queryClient.invalidateQueries({ queryKey: ['related-pages', createdBlock.page_id] })
+      await invalidateRelatedContent()
       await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
       await invalidateWorkspaceSearch()
       setErrorMessage(null)
@@ -269,7 +282,7 @@ function App() {
       queryClient.setQueryData(['page-knowledge', updatedBlock.page_id], { status: 'pending', concepts: [] })
       await queryClient.invalidateQueries({ queryKey: ['blocks', updatedBlock.page_id] })
       await queryClient.invalidateQueries({ queryKey: ['page-knowledge', updatedBlock.page_id] })
-      await queryClient.invalidateQueries({ queryKey: ['related-pages', updatedBlock.page_id] })
+      await invalidateRelatedContent()
       await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
       await invalidateWorkspaceSearch()
       setErrorMessage(null)
@@ -282,7 +295,7 @@ function App() {
       }
       await queryClient.invalidateQueries({ queryKey: ['blocks', selectedPageId] })
       await queryClient.invalidateQueries({ queryKey: ['page-knowledge', selectedPageId] })
-      await queryClient.invalidateQueries({ queryKey: ['related-pages', selectedPageId] })
+      await invalidateRelatedContent()
       await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
     },
   })
@@ -293,7 +306,7 @@ function App() {
       if (selectedPageId) queryClient.setQueryData(['page-knowledge', selectedPageId], { status: 'pending', concepts: [] })
       await queryClient.invalidateQueries({ queryKey: ['blocks', selectedPageId] })
       await queryClient.invalidateQueries({ queryKey: ['page-knowledge', selectedPageId] })
-      await queryClient.invalidateQueries({ queryKey: ['related-pages', selectedPageId] })
+      await invalidateRelatedContent()
       await invalidateWorkspaceSearch()
       setErrorMessage(null)
     },
@@ -313,6 +326,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['page-files', selectedPageId] })
       await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
       await invalidateWorkspaceSearch()
+      await invalidateRelatedContent()
       setErrorMessage(null)
     },
     onError: (error) => setErrorMessage(error instanceof ApiClientError ? error.message : 'Could not add this file.'),
@@ -325,6 +339,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['page-files', selectedPageId] })
       await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
       await invalidateWorkspaceSearch()
+      await invalidateRelatedContent()
       setDeleteTarget(null)
       setErrorMessage(null)
     },
@@ -450,6 +465,11 @@ function App() {
     setSelectedPageId(pageId)
   }
 
+  const openRelated = (pageId: string, blockId?: string | null) => {
+    setTargetBlockId(blockId ?? null)
+    setSelectedPageId(pageId)
+  }
+
   const openSource = (source: RetrievedSource) => {
     if (source.page_id) {
       setTargetBlockId(source.block_id)
@@ -495,6 +515,7 @@ function App() {
       await Promise.all(invalidations)
     }
     await invalidateWorkspaceSearch()
+    await invalidateRelatedContent()
   }
 
   if (workspaceQuery.isLoading) {
@@ -650,7 +671,7 @@ function App() {
             knowledge={knowledgeQuery.data}
             onRetryKnowledge={() => reindexMutation.mutate(selectedPage.id)}
             onRetryRelated={() => void relatedQuery.refetch()}
-            onSelectPage={selectPage}
+            onSelectPage={openRelated}
           />
         )}
 

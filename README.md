@@ -15,7 +15,7 @@ the broader direction is described in [docs/vision.md](docs/vision.md).
 - Hybrid keyword and semantic retrieval across pages and blocks
 - Filename search for all files and content search for supported UTF-8 text files
 - Recoverable page and file indexing with visible health and retry controls
-- Related-page discovery and source navigation back to pages, blocks, and files
+- Evidence-based related content with previews and navigation to matching blocks
 - Managed local AI through Ollama with an `LLMProvider` abstraction
 - Streaming assistant responses with retrieved source references
 - Validated agent tools for search, reading, structured queries, pages, tasks, and files

@@ -18,6 +18,9 @@ class FakePages:
     async def list_pages(self, _workspace_id: str) -> list[object]:
         return self.pages
 
+    async def get_page(self, page_id: str) -> object | None:
+        return next((page for page in self.pages if getattr(page, "id", None) == page_id), None)
+
 
 class FakeBlocks:
     def __init__(self, blocks: dict[str, Sequence[object]]) -> None:
@@ -146,3 +149,60 @@ async def test_unparsed_file_remains_searchable_by_filename_metadata() -> None:
     assert len(result.sources) == 1
     assert result.sources[0].file_id == "f1"
     assert result.sources[0].snippet == file.name
+
+
+@pytest.mark.asyncio
+async def test_related_content_uses_lexical_evidence_and_filters_weak_duplicates() -> None:
+    current = SimpleNamespace(id="p0", title="Private Ollama deployment", workspace_id="w1")
+    related = SimpleNamespace(id="p1", title="Local model operations", workspace_id="w1")
+    weak = SimpleNamespace(id="p2", title="Private garden notes", workspace_id="w1")
+    related_block = SimpleNamespace(
+        id="b1",
+        content={"text": "Ollama serves private local inference models on localhost."},
+    )
+    service = service_with(
+        [current, related, weak],
+        {
+            "p0": [
+                SimpleNamespace(
+                    id="b0",
+                    content={"text": "Run private Ollama models for local inference on localhost."},
+                )
+            ],
+            "p1": [related_block],
+            "p2": [SimpleNamespace(id="b2", content={"text": "Private tomato harvest."})],
+        },
+        [],
+    )
+
+    result = await service.related("p0")
+
+    assert len(result.items) == 1
+    assert result.items[0].page_id == "p1"
+    assert result.items[0].block_id == "b1"
+    assert result.items[0].snippet == related_block.content["text"]
+
+
+@pytest.mark.asyncio
+async def test_related_content_includes_strong_semantic_evidence_without_word_overlap() -> None:
+    current = SimpleNamespace(id="p0", title="Canine training journal", workspace_id="w1")
+    related = SimpleNamespace(id="p1", title="Companion behavior notes", workspace_id="w1")
+    semantic_chunk = SimpleNamespace(
+        page_id="p1",
+        block_id="b1",
+        text="Positive reinforcement routines for household pets.",
+    )
+    service = service_with(
+        [current, related],
+        {
+            "p0": [SimpleNamespace(id="b0", content={"text": "Daily puppy obedience work."})],
+            "p1": [SimpleNamespace(id="b1", content={"text": semantic_chunk.text})],
+        },
+        [],
+        [(semantic_chunk, 0.82)],
+    )
+
+    result = await service.related("p0")
+
+    assert [(item.page_id, item.block_id) for item in result.items] == [("p1", "b1")]
+    assert result.items[0].snippet == semantic_chunk.text

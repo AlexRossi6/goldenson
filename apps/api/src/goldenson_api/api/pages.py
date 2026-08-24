@@ -9,6 +9,7 @@ from goldenson_api.api.dependencies import get_db_session
 from goldenson_api.api.knowledge_tasks import queue_page_delete, queue_page_index
 from goldenson_api.api.transaction import run_mutation
 from goldenson_api.db.models.knowledge import PageKnowledge
+from goldenson_api.retrieval.service import RelatedContentResult, WorkspaceRetrievalService
 from goldenson_api.schemas.page import (
     PageCreate,
     PageCreateRequest,
@@ -109,17 +110,13 @@ async def delete_page(page_id: UUID, session: DbSession, background_tasks: Backg
     queue_page_delete(background_tasks, str(page_id))
 
 
-@router.get("/pages/{page_id}/related", summary="List related pages")
-async def related_pages(page_id: UUID, session: DbSession) -> dict[str, object]:
-    service = KnowledgeService(session)
-    related = await service.related(str(page_id))
-    pages = PageService(session)
-    items = []
-    for record, _, reason in related:
-        page = await pages.get_page(record.page_id)
-        if page is not None:
-            items.append({"page_id": page.id, "title": page.title, "reason": reason})
-    return {"items": items}
+@router.get(
+    "/pages/{page_id}/related",
+    response_model=RelatedContentResult,
+    summary="List related content",
+)
+async def related_pages(page_id: UUID, session: DbSession) -> RelatedContentResult:
+    return await WorkspaceRetrievalService(session).related(str(page_id))
 
 
 @router.get("/pages/{page_id}/knowledge", summary="Get page knowledge state")

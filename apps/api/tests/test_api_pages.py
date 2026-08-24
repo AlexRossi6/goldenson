@@ -32,6 +32,21 @@ def _create_page(
     return payload
 
 
+def _create_block(
+    client: TestClient,
+    page_id: str,
+    text: str,
+) -> dict[str, object]:
+    response = client.post(
+        f"/api/pages/{page_id}/blocks",
+        json={"type": "paragraph", "position": 0, "content": {"text": text}},
+    )
+    assert response.status_code == 201
+    payload = response.json()
+    assert isinstance(payload, dict)
+    return payload
+
+
 def test_page_create_list_get_update_delete(api_client: TestClient) -> None:
     workspace_id = _create_workspace(api_client, "Pages API Workspace")
     root = _create_page(api_client, workspace_id, "Root", 0)
@@ -86,6 +101,139 @@ def test_page_index_failure_does_not_block_page_crud(api_client: TestClient) -> 
 
     assert update_response.status_code == 200
     assert update_response.json()["title"] == "Updated after failure"
+
+
+def test_related_content_tracks_edits_deletes_and_workspace_boundaries(
+    api_client: TestClient,
+) -> None:
+    workspace_id = _create_workspace(api_client, "Related content")
+    other_workspace_id = _create_workspace(api_client, "Other related content")
+    current = _create_page(api_client, workspace_id, "Private Ollama deployment", 0)
+    related = _create_page(api_client, workspace_id, "Local model operations", 1)
+    foreign = _create_page(api_client, other_workspace_id, "Matching foreign page", 0)
+    current_id = str(current["id"])
+    related_id = str(related["id"])
+
+    for page_id, text in (
+        (current_id, "Run private Ollama models for local inference on localhost."),
+        (related_id, "Ollama serves private local inference models on localhost."),
+        (str(foreign["id"]), "Ollama serves private local inference models on localhost."),
+    ):
+        response = api_client.post(
+            f"/api/pages/{page_id}/blocks",
+            json={"type": "paragraph", "position": 0, "content": {"text": text}},
+        )
+        assert response.status_code == 201
+        if page_id == related_id:
+            related_block = response.json()
+
+    initial = api_client.get(f"/api/pages/{current_id}/related")
+    assert initial.status_code == 200
+    assert initial.json()["items"] == [
+        {
+            "page_id": related_id,
+            "title": "Local model operations",
+            "snippet": "Ollama serves private local inference models on localhost.",
+            "block_id": related_block["id"],
+        }
+    ]
+
+    updated = api_client.patch(
+        f"/api/blocks/{related_block['id']}",
+        json={
+            "content": {"text": "Tomato harvest dates and garden watering schedule."},
+            "version": related_block["version"],
+        },
+    )
+    assert updated.status_code == 200
+    assert api_client.get(f"/api/pages/{current_id}/related").json()["items"] == []
+
+    replacement = api_client.post(
+        f"/api/pages/{related_id}/blocks",
+        json={
+            "type": "paragraph",
+            "position": 1,
+            "content": {"text": "Private Ollama localhost inference operations."},
+        },
+    )
+    assert replacement.status_code == 201
+    assert api_client.get(f"/api/pages/{current_id}/related").json()["items"]
+
+    assert api_client.delete(f"/api/pages/{related_id}").status_code == 204
+    assert api_client.get(f"/api/pages/{current_id}/related").json()["items"] == []
+
+
+def test_related_pages_use_lexical_evidence_and_respect_workspace_boundaries(
+    api_client: TestClient,
+) -> None:
+    workspace_id = _create_workspace(api_client, "Related workspace")
+    foreign_workspace_id = _create_workspace(api_client, "Foreign workspace")
+    current = _create_page(api_client, workspace_id, "Private Ollama deployment", 0)
+    related = _create_page(api_client, workspace_id, "Local model operations", 1)
+    weak = _create_page(api_client, workspace_id, "Private garden notes", 2)
+    foreign = _create_page(api_client, foreign_workspace_id, "Ollama deployment copy", 0)
+    current_id = str(current["id"])
+    related_id = str(related["id"])
+    _create_block(
+        api_client,
+        current_id,
+        "Run private Ollama models for local inference on localhost.",
+    )
+    related_block = _create_block(
+        api_client,
+        related_id,
+        "Ollama serves private local inference models on localhost.",
+    )
+    _create_block(api_client, str(weak["id"]), "Private tomato harvest notes.")
+    _create_block(
+        api_client,
+        str(foreign["id"]),
+        "Ollama serves private local inference models on localhost.",
+    )
+    assert api_client.get(f"/api/pages/{current_id}/knowledge").json()["status"] == "failed"
+
+    response = api_client.get(f"/api/pages/{current_id}/related")
+
+    assert response.status_code == 200
+    assert response.json()["items"] == [
+        {
+            "page_id": related_id,
+            "title": "Local model operations",
+            "snippet": "Ollama serves private local inference models on localhost.",
+            "block_id": related_block["id"],
+        }
+    ]
+
+
+def test_related_pages_refresh_after_content_changes_and_deletion(
+    api_client: TestClient,
+) -> None:
+    workspace_id = _create_workspace(api_client, "Changing connections")
+    current = _create_page(api_client, workspace_id, "Private Ollama deployment", 0)
+    candidate = _create_page(api_client, workspace_id, "Deployment notes", 1)
+    current_id = str(current["id"])
+    candidate_id = str(candidate["id"])
+    _create_block(
+        api_client,
+        current_id,
+        "Run private Ollama models for local inference on localhost.",
+    )
+    candidate_block = _create_block(api_client, candidate_id, "Unrelated tomato harvest.")
+    assert api_client.get(f"/api/pages/{current_id}/related").json()["items"] == []
+
+    update = api_client.patch(
+        f"/api/blocks/{candidate_block['id']}",
+        json={
+            "version": candidate_block["version"],
+            "content": {"text": "Ollama serves private local inference models on localhost."},
+        },
+    )
+    assert update.status_code == 200
+    related = api_client.get(f"/api/pages/{current_id}/related").json()["items"]
+    assert [item["page_id"] for item in related] == [candidate_id]
+
+    assert api_client.delete(f"/api/pages/{candidate_id}").status_code == 204
+    assert api_client.get(f"/api/pages/{current_id}/related").json()["items"] == []
 
 
 def test_invalid_parent_relationships(api_client: TestClient) -> None:

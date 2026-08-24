@@ -466,56 +466,6 @@ class KnowledgeService:
             (by_id[chunk_id], 1.0 - distance) for chunk_id, distance in matches if chunk_id in by_id
         ]
 
-    async def related(self, page_id: str, limit: int = 5) -> list[tuple[PageKnowledge, float, str]]:
-        if limit <= 0:
-            return []
-        current = await self._session.scalar(
-            select(PageKnowledge).where(PageKnowledge.page_id == page_id)
-        )
-        if current is None or current.status != "ready":
-            return []
-        chunks = list(
-            (
-                await self._session.scalars(
-                    select(KnowledgeChunk).where(
-                        KnowledgeChunk.page_knowledge_id == current.id,
-                        KnowledgeChunk.status == "ready",
-                    )
-                )
-            ).all()
-        )
-        page_scores: dict[str, float] = {}
-        matches: list[tuple[str, float]] = []
-        for chunk in chunks[:8]:
-            vector = await self._chunk_vector(chunk.id)
-            if vector is None:
-                continue
-            matches.extend(await self._nearest(vector, current.workspace_id, limit * 4))
-        matched_chunks = await self._session.scalars(
-            select(KnowledgeChunk).where(
-                KnowledgeChunk.id.in_({chunk_id for chunk_id, _ in matches}),
-                KnowledgeChunk.status == "ready",
-            )
-        )
-        by_chunk = {chunk.id: chunk for chunk in matched_chunks}
-        for chunk_id, distance in matches:
-            match = by_chunk.get(chunk_id)
-            if match is not None and match.page_id != page_id:
-                page_scores[match.page_id] = max(
-                    page_scores.get(match.page_id, 0.0), 1.0 - distance
-                )
-        pages = await self._session.scalars(
-            select(PageKnowledge).where(PageKnowledge.page_id.in_(page_scores))
-        )
-        by_page = {page.page_id: page for page in pages}
-        return [
-            (by_page[other_page_id], score, "Similar topic")
-            for other_page_id, score in sorted(
-                page_scores.items(), key=lambda item: (-item[1], item[0])
-            )
-            if other_page_id in by_page and score >= 0.55
-        ][:limit]
-
     async def delete_page(self, page_id: str) -> None:
         await self._remove_vectors(page_id=page_id)
         await self._session.execute(delete(PageKnowledge).where(PageKnowledge.page_id == page_id))

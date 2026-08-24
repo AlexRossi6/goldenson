@@ -3,10 +3,10 @@
 React and TypeScript frontend for the GoldenSon local AI knowledge workspace.
 
 The application provides the page tree, same-surface block editor, local file UI,
-workspace search and source navigation, indexing health and recovery, related-page
-discovery, Ollama model management, streaming assistant, and approval flow for
-agent changes. Server state uses TanStack Query; lightweight selection and layout
-state uses Zustand.
+workspace search and source navigation, indexing health and recovery,
+evidence-based related content with matching passages, Ollama model management,
+streaming assistant, and approval flow for agent changes. Server state uses
+TanStack Query; lightweight selection and layout state uses Zustand.
 
 ## Development
 
