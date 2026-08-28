@@ -112,6 +112,48 @@ def test_block_concurrency_conflict(api_client: TestClient) -> None:
     assert list_response.json()["items"][0]["content"] == {"text": "v2"}
 
 
+def test_block_reorder_persists_identity_and_rejects_stale_versions(
+    api_client: TestClient,
+) -> None:
+    workspace_id = _create_workspace(api_client, "Block Reorder")
+    page_id = _create_page(api_client, workspace_id, "Movable content")
+    first = _create_block(
+        api_client,
+        page_id,
+        {"type": "paragraph", "position": 0, "content": {"text": "First"}},
+    )
+    second = _create_block(
+        api_client,
+        page_id,
+        {"type": "todo", "position": 1, "content": {"items": [{"text": "Task"}]}},
+    )
+
+    reorder = api_client.post(
+        f"/api/pages/{page_id}/blocks/reorder",
+        json={
+            "block_ids": [second["id"], first["id"]],
+            "versions": {first["id"]: first["version"], second["id"]: second["version"]},
+        },
+    )
+    assert reorder.status_code == 200
+    assert [block["id"] for block in reorder.json()["items"]] == [second["id"], first["id"]]
+    assert [block["position"] for block in reorder.json()["items"]] == [0, 1]
+    assert reorder.json()["items"][0]["content"] == {"items": [{"text": "Task"}]}
+
+    persisted = api_client.get(f"/api/pages/{page_id}/blocks")
+    assert [block["id"] for block in persisted.json()["items"]] == [second["id"], first["id"]]
+
+    stale = api_client.post(
+        f"/api/pages/{page_id}/blocks/reorder",
+        json={
+            "block_ids": [first["id"], second["id"]],
+            "versions": {first["id"]: first["version"], second["id"]: second["version"]},
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "CONCURRENCY_CONFLICT"
+
+
 def test_page_and_block_crud_survive_failed_indexing(
     api_client: TestClient,
     session_factory: async_sessionmaker[AsyncSession],

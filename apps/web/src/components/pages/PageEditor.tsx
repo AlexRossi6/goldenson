@@ -37,6 +37,7 @@ type PageEditorProps = {
       content?: Record<string, unknown>
     },
   ) => Promise<void>
+  onReorderBlocks?: (blockIds: string[], versions: Record<string, number>) => Promise<void>
   onDeleteBlock: (block: Block) => void | Promise<void>
   onUploadAttachment: (file: File) => Promise<void>
   onDeleteAttachment: (file: FileMetadata) => void
@@ -64,6 +65,7 @@ export function PageEditor({
   onUpdatePage,
   onCreateBlock,
   onUpdateBlock,
+  onReorderBlocks,
   onDeleteBlock,
   onRequestMove,
   onRequestDelete,
@@ -170,6 +172,7 @@ export function PageEditor({
         highlightedBlockId={highlightedBlockId}
         onCreateBlock={onCreateBlock}
         onUpdateBlock={onUpdateBlock}
+        onReorderBlocks={onReorderBlocks}
         onDeleteBlock={async (block) => onDeleteBlock(block)}
       />
 

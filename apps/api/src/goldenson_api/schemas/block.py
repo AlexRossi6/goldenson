@@ -28,6 +28,11 @@ class BlockUpdate(BaseModel):
     version: int = Field(ge=1)
 
 
+class BlockReorderRequest(BaseModel):
+    block_ids: list[str] = Field(min_length=1)
+    versions: dict[str, int]
+
+
 class BlockRead(BaseModel):
     id: str
     page_id: str

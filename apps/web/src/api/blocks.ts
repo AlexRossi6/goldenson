@@ -14,6 +14,11 @@ export type UpdateBlockPayload = {
   content?: Record<string, unknown>
 }
 
+export type ReorderBlocksPayload = {
+  block_ids: string[]
+  versions: Record<string, number>
+}
+
 export function listBlocks(pageId: string): Promise<BlockListResponse> {
   return apiRequest<BlockListResponse>(`/pages/${pageId}/blocks`)
 }
@@ -28,6 +33,13 @@ export function createBlock(pageId: string, payload: CreateBlockPayload): Promis
 export function updateBlock(blockId: string, payload: UpdateBlockPayload): Promise<Block> {
   return apiRequest<Block>(`/blocks/${blockId}`, {
     method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function reorderBlocks(pageId: string, payload: ReorderBlocksPayload): Promise<BlockListResponse> {
+  return apiRequest<BlockListResponse>(`/pages/${pageId}/blocks/reorder`, {
+    method: 'POST',
     body: JSON.stringify(payload),
   })
 }

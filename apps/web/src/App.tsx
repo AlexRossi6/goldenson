@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { createBlock, deleteBlock, listBlocks, updateBlock } from './api/blocks'
+import { createBlock, deleteBlock, listBlocks, reorderBlocks, updateBlock } from './api/blocks'
 import { deleteFile, getFileDownloadUrl, listFiles, listPageFiles, retryFileIndex, uploadFile } from './api/files'
 import { createPage, deletePage, getPage, listPages, updatePage } from './api/pages'
 import { createWorkspace, getWorkspaceIndexHealth, listWorkspaces, retryFailedWorkspaceIndexing } from './api/workspaces'
@@ -297,6 +297,32 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['page-knowledge', selectedPageId] })
       await invalidateRelatedContent()
       await queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] })
+    },
+  })
+
+  const reorderBlocksMutation = useMutation({
+    mutationFn: ({ pageId, blockIds, versions }: { pageId: string; blockIds: string[]; versions: Record<string, number> }) =>
+      reorderBlocks(pageId, { block_ids: blockIds, versions }),
+    onSuccess: async (result) => {
+      const pageId = result.items[0]?.page_id
+      if (!pageId) return
+      queryClient.setQueryData(['page-knowledge', pageId], { status: 'pending', concepts: [] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['blocks', pageId] }),
+        queryClient.invalidateQueries({ queryKey: ['page-knowledge', pageId] }),
+        queryClient.invalidateQueries({ queryKey: ['index-health', workspaceId] }),
+        invalidateWorkspaceSearch(),
+        invalidateRelatedContent(),
+      ])
+      setErrorMessage(null)
+    },
+    onError: async (error) => {
+      if (error instanceof ApiClientError && error.code === 'CONCURRENCY_CONFLICT') {
+        setErrorMessage('This block changed elsewhere. Latest block data has been reloaded.')
+      } else {
+        setErrorMessage('Failed to move block.')
+      }
+      await queryClient.invalidateQueries({ queryKey: ['blocks', selectedPageId] })
     },
   })
 
@@ -658,6 +684,7 @@ function App() {
             onUpdatePage={updateCurrentPage}
             onCreateBlock={createBlockForPage}
             onUpdateBlock={updateExistingBlock}
+            onReorderBlocks={(blockIds, versions) => reorderBlocksMutation.mutateAsync({ pageId: selectedPage.id, blockIds, versions }).then(() => undefined)}
             onDeleteBlock={requestDeleteBlock}
             onRequestMove={() => setMoveDialogOpen(true)}
             onRequestDelete={() => requestDeletePage(selectedPage)}

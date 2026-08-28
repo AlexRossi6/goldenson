@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 
 import type { Block } from '../../types/api'
 
@@ -10,6 +10,12 @@ type BlockPayload = {
 type InlineEditableBlockProps = {
   block: Block
   highlighted?: boolean
+  dragging?: boolean
+  dropTarget?: boolean
+  onDragStart?: (event: DragEvent<HTMLLIElement>) => void
+  onDragEnd?: () => void
+  onDragOver?: (event: DragEvent<HTMLLIElement>) => void
+  onDrop?: (event: DragEvent<HTMLLIElement>) => void
   onCreateBlockAfter: (content: Record<string, unknown>) => Promise<Block>
   onUpdateBlock: (blockId: string, payload: BlockPayload) => Promise<void>
   onDeleteBlock: (block: Block) => Promise<void>
@@ -75,7 +81,7 @@ function focusAt(element: HTMLElement | null, offset: number): void {
   selection?.addRange(range)
 }
 
-export function InlineEditableBlock({ block, highlighted = false, onCreateBlockAfter, onUpdateBlock, onDeleteBlock }: InlineEditableBlockProps) {
+export function InlineEditableBlock({ block, highlighted = false, dragging = false, dropTarget = false, onDragStart, onDragEnd, onDragOver, onDrop, onCreateBlockAfter, onUpdateBlock, onDeleteBlock }: InlineEditableBlockProps) {
   const initialText = block.type === 'code'
     ? typeof block.content.code === 'string' ? block.content.code : ''
     : typeof block.content.text === 'string' ? block.content.text : ''
@@ -88,13 +94,25 @@ export function InlineEditableBlock({ block, highlighted = false, onCreateBlockA
   const handledEnterRef = useRef(false)
   const textRef = useRef(initialText)
   const todoRef = useRef(todoContent)
+  const versionRef = useRef(block.version)
+  const pendingSaveRef = useRef<Record<string, unknown> | null>(null)
+  const savingRef = useRef(false)
 
   const save = async (content: Record<string, unknown>) => {
-    if (JSON.stringify(content) === JSON.stringify(block.content)) return
+    if (JSON.stringify(content) === JSON.stringify(block.content) && !pendingSaveRef.current) return
+    pendingSaveRef.current = content
+    if (savingRef.current) return
+    savingRef.current = true
     setBusy(true)
     try {
-      await onUpdateBlock(block.id, { version: block.version, content })
+      while (pendingSaveRef.current) {
+        const nextContent = pendingSaveRef.current
+        pendingSaveRef.current = null
+        await onUpdateBlock(block.id, { version: versionRef.current, content: nextContent })
+        versionRef.current += 1
+      }
     } finally {
+      savingRef.current = false
       setBusy(false)
     }
   }
@@ -197,8 +215,7 @@ export function InlineEditableBlock({ block, highlighted = false, onCreateBlockA
   }
 
   const handleParagraphEnter = (shiftKey: boolean) => {
-    if (shiftKey) insertParagraphLineBreak()
-    else finishParagraph()
+    insertParagraphLineBreak()
   }
 
   const handleParagraphBeforeInput = (event: FormEvent<HTMLDivElement>) => {
@@ -275,8 +292,9 @@ export function InlineEditableBlock({ block, highlighted = false, onCreateBlockA
   const paragraph = parseMarkdownLine(text)
 
   return (
-    <li className={`block-card block-${block.type}${highlighted ? ' is-highlighted' : ''}`} data-block-id={block.id}>
+    <li className={`block-card block-${block.type}${highlighted ? ' is-highlighted' : ''}${dragging ? ' is-dragging' : ''}${dropTarget ? ' is-drop-target' : ''}`} data-block-id={block.id} draggable onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop}>
       <div className="block-context-actions">
+        <button type="button" className="block-drag-handle text-button" aria-label={`Move ${block.type} block`} draggable onMouseDown={(event) => event.stopPropagation()}>::</button>
         <button type="button" className="block-delete text-button danger-link" aria-label={`Delete ${block.type} block`} onClick={() => void onDeleteBlock(block)} disabled={busy}>Delete</button>
       </div>
       <div className="block-content" aria-busy={busy}>
@@ -284,7 +302,7 @@ export function InlineEditableBlock({ block, highlighted = false, onCreateBlockA
           <div className="todo-block">
             <div
               className="inline-text todo-title"
-              contentEditable={!busy}
+              contentEditable
               suppressContentEditableWarning
               role="textbox"
               aria-label="Todo title"
@@ -308,7 +326,6 @@ export function InlineEditableBlock({ block, highlighted = false, onCreateBlockA
                   type="checkbox"
                   aria-label={`Mark ${item.text || 'task'} complete`}
                   checked={item.completed}
-                  disabled={busy}
                   onChange={() => {
                     const items = todoRef.current.items.map((current) => current.id === item.id ? { ...current, completed: !current.completed } : current)
                     updateTodo({ ...todoRef.current, items }, true)
@@ -317,7 +334,7 @@ export function InlineEditableBlock({ block, highlighted = false, onCreateBlockA
                 <div
                   ref={(element) => { todoItemRefs.current[index] = element }}
                   className={`inline-text todo-item${item.completed ? ' is-completed' : ''}`}
-                  contentEditable={!busy}
+                  contentEditable
                   suppressContentEditableWarning
                   role="textbox"
                   aria-label={`Todo item ${index + 1}`}
@@ -338,7 +355,7 @@ export function InlineEditableBlock({ block, highlighted = false, onCreateBlockA
           <pre className="inline-code-shell">
             <code
               className="inline-code"
-              contentEditable={!busy}
+              contentEditable
               suppressContentEditableWarning
               role="textbox"
               aria-label="Code content"
@@ -357,7 +374,7 @@ export function InlineEditableBlock({ block, highlighted = false, onCreateBlockA
             <div
               ref={paragraphRef}
               className={`inline-text markdown-level-${paragraph.level}`}
-              contentEditable={!busy}
+              contentEditable
               suppressContentEditableWarning
               role="textbox"
               aria-label="Paragraph content"

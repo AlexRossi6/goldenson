@@ -522,6 +522,28 @@ async def test_simple_create_page_reaches_approval_without_irrelevant_retrieval(
 
 
 @pytest.mark.asyncio
+async def test_approved_mutation_result_hides_internal_ids_from_model(
+    session: AsyncSession,
+) -> None:
+    workspace_id, _ = await seed_workspace(session)
+    provider = FakeProvider([LLMResponse(content="The page was created.")])
+    service = AgentService(
+        session, provider, max_tool_calls=4, max_run_seconds=10, tool_timeout_seconds=2
+    )
+
+    initial = await collect_events(service, workspace_id, "Create a page called Private Result")
+    proposal = next(event["proposal"] for event in initial if event.get("type") == "proposal")
+    assert isinstance(proposal, dict)
+    _ = [event async for event in service.decide(workspace_id, str(proposal["tool_call_id"]), True)]
+
+    page = await PageService(session).get_by_title_and_parent(workspace_id, "Private Result", None)
+    assert page is not None
+    tool_message = provider.calls[0][-1].content
+    assert page.id not in tool_message
+    assert "Private Result" in tool_message
+
+
+@pytest.mark.asyncio
 async def test_rejected_write_is_not_executed(session: AsyncSession) -> None:
     workspace_id, _ = await seed_workspace(session)
     provider = FakeProvider(

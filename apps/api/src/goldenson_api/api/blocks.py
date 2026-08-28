@@ -12,6 +12,7 @@ from goldenson_api.schemas.block import (
     BlockCreateRequest,
     BlockListResponse,
     BlockRead,
+    BlockReorderRequest,
     BlockUpdate,
 )
 from goldenson_api.services.block_service import BlockService
@@ -78,6 +79,29 @@ async def update_block(
     result = await run_mutation(session, action)
     page = await PageService(session).get_page(result.page_id)
     queue_page_index(background_tasks, result.page_id, None if page is None else page.version)
+    return result
+
+
+@router.post(
+    "/pages/{page_id}/blocks/reorder",
+    response_model=BlockListResponse,
+    summary="Reorder blocks",
+)
+async def reorder_blocks(
+    page_id: UUID,
+    payload: BlockReorderRequest,
+    session: DbSession,
+    background_tasks: BackgroundTasks,
+) -> BlockListResponse:
+    service = BlockService(session)
+
+    async def action() -> BlockListResponse:
+        blocks = await service.reorder_blocks(str(page_id), payload.block_ids, payload.versions)
+        return BlockListResponse(items=[BlockRead.model_validate(block) for block in blocks])
+
+    result = await run_mutation(session, action)
+    page = await PageService(session).get_page(str(page_id))
+    queue_page_index(background_tasks, str(page_id), None if page is None else page.version)
     return result
 
 

@@ -36,6 +36,23 @@ class BlockRepository:
         result: Result[tuple[Block]] = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def reorder_for_page(self, page_id: str, ordered_ids: list[str]) -> list[Block]:
+        blocks = await self.list_for_page(page_id)
+        position_offset = len(blocks) + 1
+        await self._session.execute(
+            update(Block)
+            .where(Block.page_id == page_id)
+            .values(position=Block.position + position_offset)
+        )
+        for position, block_id in enumerate(ordered_ids):
+            await self._session.execute(
+                update(Block)
+                .where(Block.id == block_id)
+                .values(position=position, version=Block.version + 1, updated_at=_utc_now())
+            )
+        await self._session.flush()
+        return await self.list_for_page(page_id)
+
     async def delete_for_pages(self, page_ids: list[str]) -> int:
         if not page_ids:
             return 0

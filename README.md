@@ -11,6 +11,8 @@ the broader direction is described in [docs/vision.md](docs/vision.md).
 
 - Local workspaces with nested pages and block-based editing
 - Paragraph, heading, checklist, code, quote, and divider blocks
+- Inline to-do item editing, completion, and keyboard-friendly item management
+- Direct block reordering with persisted order and optimistic concurrency checks
 - Local file uploads and page attachments
 - Hybrid keyword and semantic retrieval across pages and blocks
 - Filename search for all files and content search for supported UTF-8 text files

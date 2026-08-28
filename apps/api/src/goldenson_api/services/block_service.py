@@ -37,6 +37,21 @@ class BlockService:
             raise NotFoundError("page not found")
         return await self._repository.list_for_page(page_id)
 
+    async def reorder_blocks(
+        self, page_id: str, ordered_ids: list[str], expected_versions: dict[str, int]
+    ) -> list[Block]:
+        page = await self._page_repository.get_by_id(page_id)
+        if page is None:
+            raise NotFoundError("page not found")
+        blocks = await self._repository.list_for_page(page_id)
+        current_ids = {block.id for block in blocks}
+        if len(ordered_ids) != len(current_ids) or set(ordered_ids) != current_ids:
+            raise BadRequestError("reorder must include every block exactly once")
+        for block in blocks:
+            if expected_versions.get(block.id) != block.version:
+                raise ConcurrencyConflictError("block reorder rejected due to stale version")
+        return await self._repository.reorder_for_page(page_id, ordered_ids)
+
     async def update_content(self, block_id: str, payload: BlockUpdateContent) -> Block:
         updated = await self._repository.update_content_with_version(
             block_id,

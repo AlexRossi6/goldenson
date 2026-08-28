@@ -78,6 +78,18 @@ def sanitize_for_audit(value: object) -> object:
     return str(value)
 
 
+def _model_tool_result(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: _model_tool_result(item)
+            for key, item in value.items()
+            if key != "id" and not key.endswith("_id")
+        }
+    if isinstance(value, list):
+        return [_model_tool_result(item) for item in value]
+    return value
+
+
 def cancel_agent_run(run_id: str) -> bool:
     event = _cancel_events.get(run_id)
     if event is None:
@@ -284,7 +296,9 @@ class AgentService:
                 "tool_name": tool_call.tool_name,
                 "result": result,
             }
-            tool_content: dict[str, object] = {"status": "approved", "result": result}
+            model_result = _model_tool_result(result)
+            assert isinstance(model_result, dict)
+            tool_content: dict[str, object] = {"status": "approved", "result": model_result}
         else:
             tool_content = {"status": "rejected", "message": "The user rejected this change."}
             await self._audit.finish_tool_call(

@@ -52,13 +52,100 @@ describe('BlockEditor', () => {
     )
 
     await user.click(screen.getByRole('button', { name: '+ Add block' }))
-    await user.click(screen.getByRole('button', { name: 'Paragraph' }))
+    await user.click(screen.getByRole('option', { name: /Paragraph/ }))
 
     expect(onCreateBlock).toHaveBeenCalledWith({
       type: 'paragraph',
       position: 0,
       content: { text: '' },
     })
+  })
+
+  it('opens a searchable picker with the supported block types', async () => {
+    const user = userEvent.setup()
+    render(
+      <BlockEditor
+        blocks={[]}
+        onCreateBlock={vi.fn().mockResolvedValue(undefined)}
+        onUpdateBlock={vi.fn().mockResolvedValue(undefined)}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '+ Add block' }))
+
+    expect(screen.getByRole('dialog', { name: 'Add a block' })).toBeInTheDocument()
+    expect(screen.getAllByRole('option')).toHaveLength(3)
+    expect(screen.getByRole('option', { name: /Paragraph/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /To-do/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Code/ })).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Find a block' })).toHaveFocus()
+  })
+
+  it('filters block types immediately and shows an empty state for no matches', async () => {
+    const user = userEvent.setup()
+    render(
+      <BlockEditor
+        blocks={[]}
+        onCreateBlock={vi.fn().mockResolvedValue(undefined)}
+        onUpdateBlock={vi.fn().mockResolvedValue(undefined)}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '+ Add block' }))
+    const search = screen.getByRole('searchbox', { name: 'Find a block' })
+    await user.type(search, 'task')
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    expect(screen.getByRole('option', { name: /To-do/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /Paragraph/ })).not.toBeInTheDocument()
+
+    await user.clear(search)
+    await user.type(search, 'calendar')
+    expect(screen.queryAllByRole('option')).toHaveLength(0)
+    expect(screen.getByText('No matching block types.')).toBeInTheDocument()
+  })
+
+  it('creates the selected block and closes the picker', async () => {
+    const user = userEvent.setup()
+    const onCreateBlock = vi.fn().mockResolvedValue(undefined)
+    render(
+      <BlockEditor
+        blocks={[]}
+        onCreateBlock={onCreateBlock}
+        onUpdateBlock={vi.fn().mockResolvedValue(undefined)}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '+ Add block' }))
+    await user.click(screen.getByRole('option', { name: /To-do/ }))
+
+    expect(onCreateBlock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'todo',
+      position: 0,
+      content: expect.objectContaining({ title: '', items: expect.any(Array) }),
+    }))
+    expect(screen.queryByRole('dialog', { name: 'Add a block' })).not.toBeInTheDocument()
+  })
+
+  it('dismisses the picker without creating a block', async () => {
+    const user = userEvent.setup()
+    const onCreateBlock = vi.fn().mockResolvedValue(undefined)
+    render(
+      <BlockEditor
+        blocks={[]}
+        onCreateBlock={onCreateBlock}
+        onUpdateBlock={vi.fn().mockResolvedValue(undefined)}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '+ Add block' }))
+    await user.keyboard('{Escape}')
+
+    expect(onCreateBlock).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'Add a block' })).not.toBeInTheDocument()
   })
 
   it('renders existing blocks sorted by position', () => {
@@ -98,6 +185,41 @@ describe('BlockEditor', () => {
     const deleteAction = screen.getByRole('button', { name: 'Delete paragraph block' })
     expect(deleteAction).toHaveClass('block-delete')
     expect(deleteAction.parentElement).toHaveClass('block-context-actions')
+  })
+
+  it('reorders mixed blocks by their drag handle without changing block identity', async () => {
+    const onReorderBlocks = vi.fn().mockResolvedValue(undefined)
+    render(
+      <BlockEditor
+        blocks={[
+          makeBlock({ id: 'paragraph', page_id: 'p1', type: 'paragraph', position: 0, content: { text: 'Paragraph' } }),
+          makeBlock({ id: 'todo', page_id: 'p1', type: 'todo', position: 1, content: { title: 'Tasks', items: [] } }),
+          makeBlock({ id: 'heading', page_id: 'p1', type: 'heading', position: 2, content: { text: 'Heading' } }),
+        ]}
+        onCreateBlock={vi.fn().mockResolvedValue(undefined)}
+        onUpdateBlock={vi.fn().mockResolvedValue(undefined)}
+        onDeleteBlock={vi.fn().mockResolvedValue(undefined)}
+        onReorderBlocks={onReorderBlocks}
+      />,
+    )
+
+    const handle = screen.getByRole('button', { name: 'Move todo block' })
+    const listItems = screen.getAllByRole('listitem')
+    fireEvent.dragStart(handle, { dataTransfer: { effectAllowed: '', setData: vi.fn() } })
+    fireEvent.dragOver(listItems[0], { preventDefault: vi.fn() })
+    fireEvent.drop(listItems[0], { preventDefault: vi.fn() })
+
+    await waitFor(() => expect(onReorderBlocks).toHaveBeenCalledWith(
+      ['todo', 'paragraph', 'heading'],
+      { todo: 1, paragraph: 1, heading: 1 },
+    ))
+    expect(screen.getByRole('textbox', { name: 'Paragraph content' })).toHaveTextContent('Paragraph')
+    expect(screen.getByRole('textbox', { name: 'Heading content' })).toHaveTextContent('Heading')
+
+    fireEvent.dragStart(screen.getByRole('textbox', { name: 'Paragraph content' }), {
+      dataTransfer: { effectAllowed: '', setData: vi.fn() },
+    })
+    expect(onReorderBlocks).toHaveBeenCalledTimes(1)
   })
 
   it('highlights the originating block selected from a source', () => {
@@ -286,7 +408,7 @@ describe('BlockEditor', () => {
     expect(title).toHaveTextContent('Research local AI')
     expect(item).toHaveTextContent('Compare Ollama')
     expect(onUpdateBlock).toHaveBeenLastCalledWith('todo', {
-      version: 1,
+      version: 2,
       content: { title: 'Research local AI', items: [{ id: 'item1', text: 'Compare Ollama', completed: false }] },
     })
   })
@@ -314,7 +436,7 @@ describe('BlockEditor', () => {
 
     expect(secondItem).toHaveTextContent('Compare llama.cpp')
     expect(onUpdateBlock).toHaveBeenLastCalledWith('todo', {
-      version: 1,
+      version: 3,
       content: {
         title: 'Research',
         items: [
