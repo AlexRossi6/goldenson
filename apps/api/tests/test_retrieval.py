@@ -98,6 +98,75 @@ async def test_exact_page_and_block_duplicate_prefers_block_provenance() -> None
 
 
 @pytest.mark.asyncio
+async def test_page_result_is_removed_when_a_different_block_contains_the_match() -> None:
+    page = SimpleNamespace(id="p1", title="Launch notes", workspace_id="w1")
+    block = SimpleNamespace(id="b1", content={"text": "Starling launches in October."})
+    semantic_page = SimpleNamespace(page_id="p1", block_id=None, text="launch planning context")
+    service = service_with([page], {"p1": [block]}, [], [(semantic_page, 0.9)])
+
+    result = await service.search("w1", "Starling launches October")
+
+    assert [(source.kind, source.block_id) for source in result.sources] == [("block", "b1")]
+
+
+@pytest.mark.asyncio
+async def test_distinct_matching_blocks_on_one_page_are_preserved() -> None:
+    page = SimpleNamespace(id="p1", title="Launch notes", workspace_id="w1")
+    blocks = [
+        SimpleNamespace(id="b1", content={"text": "Starling launches in October."}),
+        SimpleNamespace(id="b2", content={"text": "October launch review is scheduled Friday."}),
+    ]
+    service = service_with([page], {"p1": blocks}, [])
+
+    result = await service.search("w1", "October launch", limit=5)
+
+    assert {source.block_id for source in result.sources} == {"b1", "b2"}
+    assert all(source.kind == "block" for source in result.sources)
+    assert {source.snippet for source in result.sources} == {
+        "Starling launches in October.",
+        "October launch review is scheduled Friday.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_title_only_match_keeps_page_provenance() -> None:
+    page = SimpleNamespace(id="p1", title="Kubernetes deployment", workspace_id="w1")
+    service = service_with([page], {"p1": []}, [])
+
+    result = await service.search("w1", "Kubernetes deployment")
+
+    assert [(source.kind, source.page_id, source.block_id) for source in result.sources] == [
+        ("page", "p1", None)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_semantic_chunks_for_one_block_return_one_result() -> None:
+    page = SimpleNamespace(id="p1", title="Launch notes", workspace_id="w1")
+    block = SimpleNamespace(id="b1", content={"text": "Starling launches in October."})
+    semantic_chunks = [
+        (SimpleNamespace(page_id="p1", block_id="b1", text="Starling launches"), 0.9),
+        (SimpleNamespace(page_id="p1", block_id="b1", text="launches in October"), 0.8),
+    ]
+    service = service_with([page], {"p1": [block]}, [], semantic_chunks)
+
+    result = await service.search("w1", "Starling launches", limit=5)
+
+    assert [source.block_id for source in result.sources] == ["b1"]
+
+
+@pytest.mark.asyncio
+async def test_lexical_fallback_remains_block_focused_without_embeddings() -> None:
+    page = SimpleNamespace(id="p1", title="Launch notes", workspace_id="w1")
+    block = SimpleNamespace(id="b1", content={"text": "Starling launches in October."})
+    service = service_with([page], {"p1": [block]}, [], semantic=[])
+
+    result = await service.search("w1", "Starling launches October")
+
+    assert [(source.kind, source.block_id) for source in result.sources] == [("block", "b1")]
+
+
+@pytest.mark.asyncio
 async def test_semantic_only_result_is_returned_without_lexical_overlap() -> None:
     page = SimpleNamespace(id="p1", title="Local experiments", workspace_id="w1")
     semantic_record = SimpleNamespace(page_id="p1", block_id=None, text="semantic content")

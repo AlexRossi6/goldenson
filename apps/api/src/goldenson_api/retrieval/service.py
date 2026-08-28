@@ -124,6 +124,30 @@ def _source_sort_key(source: RetrievedSource) -> tuple[float, str, str, str, str
     )
 
 
+def _compact_sources(sources: list[RetrievedSource]) -> list[RetrievedSource]:
+    block_page_ids = {source.page_id for source in sources if source.kind == "block"}
+    page_scores = {
+        source.page_id: source.score
+        for source in sources
+        if source.kind == "page" and source.page_id is not None
+    }
+    seen_blocks: set[tuple[str | None, str]] = set()
+    compacted: list[RetrievedSource] = []
+    for source in sources:
+        if source.kind == "page" and source.page_id in block_page_ids:
+            continue
+        if source.kind == "block" and source.block_id is not None:
+            block_key = (source.page_id, source.block_id)
+            if block_key in seen_blocks:
+                continue
+            seen_blocks.add(block_key)
+            page_score = page_scores.get(source.page_id, 0.0) if source.page_id is not None else 0.0
+            if page_score > source.score:
+                source = source.model_copy(update={"score": page_score})
+        compacted.append(source)
+    return compacted
+
+
 class WorkspaceRetrievalService:
     def __init__(self, session: AsyncSession) -> None:
         self._pages = PageService(session)
@@ -223,26 +247,7 @@ class WorkspaceRetrievalService:
             candidates.values(),
             key=_source_sort_key,
         )
-        block_evidence = {
-            (source.page_id, source.snippet): source.score
-            for source in ranked_sources
-            if source.kind == "block"
-        }
-        duplicate_page_scores = {
-            (source.page_id, source.snippet): source.score
-            for source in ranked_sources
-            if source.kind == "page" and (source.page_id, source.snippet) in block_evidence
-        }
-        compacted_sources = []
-        for source in ranked_sources:
-            evidence_key = (source.page_id, source.snippet)
-            if source.kind == "page" and evidence_key in block_evidence:
-                continue
-            if source.kind == "block" and evidence_key in duplicate_page_scores:
-                source = source.model_copy(
-                    update={"score": max(source.score, duplicate_page_scores[evidence_key])}
-                )
-            compacted_sources.append(source)
+        compacted_sources = _compact_sources(ranked_sources)
         sources = sorted(compacted_sources, key=_source_sort_key)[:limit]
         context_parts = [
             f"SOURCE {index + 1}: {source.title}\n{source.snippet}"
