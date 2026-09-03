@@ -39,6 +39,36 @@ async def test_create_blocks_ordering_and_json_content(session: AsyncSession) ->
 
 
 @pytest.mark.asyncio
+async def test_create_block_after_delete_uses_next_available_position(
+    session: AsyncSession,
+) -> None:
+    workspace = await WorkspaceService(session).create_workspace(
+        WorkspaceCreate(name="Block Position Workspace")
+    )
+    page = await PageService(session).create_page(
+        PageCreate(workspace_id=workspace.id, title="Page", position=0)
+    )
+    block_service = BlockService(session)
+    first = await block_service.create_block(
+        BlockCreate(page_id=page.id, type="paragraph", position=0, content={"text": "First"})
+    )
+    second = await block_service.create_block(
+        BlockCreate(page_id=page.id, type="paragraph", position=1, content={"text": "Second"})
+    )
+    await session.commit()
+
+    await block_service.delete_block(first.id)
+    created = await block_service.create_block(
+        BlockCreate(page_id=page.id, type="heading", position=1, content={"text": "Third"})
+    )
+    await session.commit()
+
+    blocks = await block_service.list_blocks(page.id)
+    assert [block.id for block in blocks] == [second.id, created.id]
+    assert [block.position for block in blocks] == [1, 2]
+
+
+@pytest.mark.asyncio
 async def test_reorder_blocks_preserves_identity_content_and_order_after_reload(
     session: AsyncSession,
 ) -> None:

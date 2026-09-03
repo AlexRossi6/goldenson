@@ -23,7 +23,35 @@ class BlockRepository:
         position: int,
         content: dict[str, object],
     ) -> Block:
-        block = Block(page_id=page_id, type=block_type, position=position, content=content)
+        blocks = await self.list_for_page(page_id)
+        if position >= len(blocks):
+            insert_position = (blocks[-1].position + 1) if blocks else 0
+        else:
+            insert_position = blocks[position].position
+
+            original_positions = {block.id: block.position for block in blocks}
+            position_offset = len(blocks) + 1
+            await self._session.execute(
+                update(Block)
+                .where(Block.page_id == page_id)
+                .values(position=Block.position + position_offset)
+            )
+            for block in blocks:
+                original_position = original_positions[block.id]
+                if original_position >= insert_position:
+                    await self._session.execute(
+                        update(Block)
+                        .where(Block.id == block.id)
+                        .values(position=original_position + 1)
+                    )
+                else:
+                    await self._session.execute(
+                        update(Block)
+                        .where(Block.id == block.id)
+                        .values(position=original_position)
+                    )
+
+        block = Block(page_id=page_id, type=block_type, position=insert_position, content=content)
         self._session.add(block)
         await self._session.flush()
         return block

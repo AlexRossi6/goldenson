@@ -378,7 +378,12 @@ class AgentService:
                         retrieval = await WorkspaceRetrievalService(self._session).search(
                             run.workspace_id, request
                         )
-                    direct_answer_requires_evidence = not retrieval.sources
+                    answer_sources = (
+                        retrieval.sources
+                        if retrieval.answer_sources is None
+                        else retrieval.answer_sources
+                    )
+                    direct_answer_requires_evidence = not answer_sources
                     logger.debug(
                         "agent lifecycle run=%s stage=retrieval duration_ms=%.1f skipped=%s",
                         run.id,
@@ -387,7 +392,7 @@ class AgentService:
                     )
                     yield {
                         "type": "sources",
-                        "sources": [source.model_dump(mode="json") for source in retrieval.sources],
+                        "sources": [source.model_dump(mode="json") for source in answer_sources],
                     }
                     safe_request = _sanitize_text(request)
                     safe_context = _sanitize_text(retrieval.context)

@@ -175,6 +175,58 @@ async def test_semantic_only_result_is_returned_without_lexical_overlap() -> Non
     result = await service.search("w1", "meaning query", limit=3)
 
     assert [(source.kind, source.page_id) for source in result.sources] == [("page", "p1")]
+    assert [(source.kind, source.page_id) for source in result.answer_sources or []] == [
+        ("page", "p1")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_answer_sources_exclude_semantic_only_context_candidates() -> None:
+    miles_page = SimpleNamespace(id="p1", title="Miles notes", workspace_id="w1")
+    career_page = SimpleNamespace(id="p2", title="Thoughts", workspace_id="w1")
+    miles_block = SimpleNamespace(
+        id="b1", content={"text": "I decided to keep talking with Miles."}
+    )
+    semantic_thoughts = SimpleNamespace(
+        page_id="p2", block_id=None, text="General career reflections"
+    )
+    service = service_with(
+        [miles_page, career_page],
+        {"p1": [miles_block], "p2": []},
+        [],
+        [(semantic_thoughts, 0.9)],
+    )
+
+    result = await service.search("w1", "What did I decide about Miles?", limit=5)
+
+    assert {source.page_id for source in result.sources} == {"p1", "p2"}
+    assert [(source.page_id, source.block_id) for source in result.answer_sources or []] == [
+        ("p1", "b1")
+    ]
+    assert "General career reflections" in result.context
+    assert result.answer_sources is not None
+    assert result.answer_sources[0].block_id == miles_block.id
+
+
+@pytest.mark.asyncio
+async def test_answer_sources_preserve_multiple_lexical_evidence_pages() -> None:
+    first_page = SimpleNamespace(id="p1", title="Miles decision", workspace_id="w1")
+    second_page = SimpleNamespace(id="p2", title="Miles follow-up", workspace_id="w1")
+    service = service_with(
+        [first_page, second_page],
+        {
+            "p1": [SimpleNamespace(id="b1", content={"text": "Miles chose the west route."})],
+            "p2": [
+                SimpleNamespace(id="b2", content={"text": "Miles will review the plan Friday."})
+            ],
+        },
+        [],
+    )
+
+    result = await service.search("w1", "What did I decide about Miles?", limit=5)
+
+    assert {source.page_id for source in result.answer_sources or []} == {"p1", "p2"}
+    assert {source.block_id for source in result.answer_sources or []} == {"b1", "b2"}
 
 
 @pytest.mark.asyncio

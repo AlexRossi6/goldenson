@@ -59,6 +59,7 @@ class RetrievedSource(BaseModel):
 class RetrievalResult(BaseModel):
     context: str
     sources: list[RetrievedSource]
+    answer_sources: list[RetrievedSource] | None = Field(default=None, exclude=True)
 
 
 class RelatedContentItem(BaseModel):
@@ -146,6 +147,23 @@ def _compact_sources(sources: list[RetrievedSource]) -> list[RetrievedSource]:
                 source = source.model_copy(update={"score": page_score})
         compacted.append(source)
     return compacted
+
+
+def _select_answer_sources(query: str, sources: list[RetrievedSource]) -> list[RetrievedSource]:
+    """Keep visible evidence focused when semantic retrieval has broad candidates."""
+    if not sources:
+        return []
+
+    lexical_scores = [
+        (source, _keyword_score(query, source.title, source.snippet)) for source in sources
+    ]
+    lexical_matches = [(source, score) for source, score in lexical_scores if score > 0]
+    if not lexical_matches:
+        return sources
+
+    strongest_score = max(score for _, score in lexical_matches)
+    minimum_score = max(0.15, strongest_score * 0.5)
+    return [source for source, score in lexical_matches if score >= minimum_score]
 
 
 class WorkspaceRetrievalService:
@@ -253,7 +271,11 @@ class WorkspaceRetrievalService:
             f"SOURCE {index + 1}: {source.title}\n{source.snippet}"
             for index, source in enumerate(sources)
         ]
-        return RetrievalResult(context="\n\n".join(context_parts)[:12000], sources=sources)
+        return RetrievalResult(
+            context="\n\n".join(context_parts)[:12000],
+            sources=sources,
+            answer_sources=_select_answer_sources(query, sources),
+        )
 
     async def related(self, page_id: str, limit: int = 5) -> RelatedContentResult:
         if limit <= 0:
