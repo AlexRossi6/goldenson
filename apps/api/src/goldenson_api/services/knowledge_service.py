@@ -469,3 +469,17 @@ class KnowledgeService:
     async def delete_page(self, page_id: str) -> None:
         await self._remove_vectors(page_id=page_id)
         await self._session.execute(delete(PageKnowledge).where(PageKnowledge.page_id == page_id))
+
+    async def embed_text(self, text: str) -> list[float]:
+        """
+        Embed a single piece of text using the configured embedding provider.
+        
+        Returns an empty list if the provider is unavailable.
+        """
+        if not text.strip():
+            return []
+        try:
+            return await self._embeddings.embed(text)
+        except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+            logger.debug("text embedding failed: %s", exc)
+            return []

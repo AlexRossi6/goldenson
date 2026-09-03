@@ -460,6 +460,8 @@ class AgentService:
                     lifecycle_started=lifecycle_started,
                     initial_response=initial_response,
                     direct_answer_requires_evidence=direct_answer_requires_evidence,
+                    retrieval=retrieval if request is not None else None,
+                    request=request,
                 ):
                     yield event
         except asyncio.CancelledError:
@@ -512,6 +514,8 @@ class AgentService:
         lifecycle_started: float | None = None,
         initial_response: LLMResponse | None = None,
         direct_answer_requires_evidence: bool = False,
+        retrieval: RetrievalResult | None = None,
+        request: str | None = None,
     ) -> AsyncIterator[dict[str, object]]:
         executor = AgentToolExecutor(self._session, run.workspace_id)
 
@@ -559,6 +563,48 @@ class AgentService:
                 )
             )
             if not response.tool_calls:
+                # Experiment: rescore sources based on the final answer
+                final_sources_to_emit = None
+                if retrieval and request:
+                    # Recompute initial answer sources (same logic as _execute_segment)
+                    initial_answer_sources = (
+                        retrieval.sources
+                        if retrieval.answer_sources is None
+                        else retrieval.answer_sources
+                    )
+                    
+                    # Rescore based on answer
+                    rescore_started = time.monotonic()
+                    rescored, embed_latency = await WorkspaceRetrievalService(
+                        self._session
+                    ).rescore_sources_by_answer(
+                        response.content, request, retrieval.sources
+                    )
+                    rescore_latency_ms = (time.monotonic() - rescore_started) * 1000
+                    
+                    # Check if rescoring changed the sources to emit
+                    if rescored != initial_answer_sources:
+                        final_sources_to_emit = rescored
+                        logger.debug(
+                            "agent lifecycle run=%s stage=rescore duration_ms=%.1f embed_ms=%.1f "
+                            "sources_before=%d sources_after=%d",
+                            run.id,
+                            rescore_latency_ms,
+                            embed_latency,
+                            len(initial_answer_sources),
+                            len(rescored),
+                        )
+                
+                # Re-emit updated sources if they changed
+                if final_sources_to_emit is not None:
+                    yield {
+                        "type": "sources",
+                        "sources": [
+                            source.model_dump(mode="json")
+                            for source in final_sources_to_emit
+                        ],
+                    }
+                
                 for chunk in _text_chunks(response.content):
                     yield {"type": "text", "content": chunk}
                 run.messages = _serialize_messages(messages)

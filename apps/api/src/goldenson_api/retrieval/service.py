@@ -1,6 +1,10 @@
+
+
 from __future__ import annotations
 
+import logging
 import re
+import time
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -11,6 +15,8 @@ from goldenson_api.services.errors import NotFoundError
 from goldenson_api.services.file_service import FileService
 from goldenson_api.services.knowledge_service import KnowledgeService
 from goldenson_api.services.page_service import PageService
+
+logger = logging.getLogger(__name__)
 
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 _QUERY_STOP_WORDS = {
@@ -81,6 +87,11 @@ _SOURCE_BONUS = {"page": 0.05, "block": 0.02, "file": 0.0}
 _RELATED_MIN_SCORE = 0.25
 _RELATED_PASSAGE_LENGTH = 1200
 _RELATED_PASSAGE_LIMIT = 8
+
+# Answer-aware source rescoring (experiment)
+_ANSWER_EMBEDDING_MIN_LENGTH = 15  # Require enough tokens for meaningful embedding
+_ANSWER_SEMANTIC_WEIGHT = 0.35  # Lower than retrieval semantic weight; additive signal
+_ANSWER_SCORE_THRESHOLD = 0.25  # Minimum answer/source similarity to count
 
 
 def _keyword_score(query: str, title: str, text: str) -> float:
@@ -340,3 +351,80 @@ class WorkspaceRetrievalService:
                 )
             )
         return RelatedContentResult(items=items)
+
+    async def rescore_sources_by_answer(
+        self,
+        answer: str,
+        query: str,
+        sources: list[RetrievedSource],
+    ) -> tuple[list[RetrievedSource], float]:
+        """
+        Rescore candidate sources based on their semantic similarity to the final answer.
+        
+        This is an experiment to improve source selection by combining the answer's
+        embedding with existing deterministic relevance signals.
+        
+        Returns:
+            (rescored_sources, embedding_latency_ms)
+        """
+        if not sources or not answer.strip():
+            return sources, 0.0
+        
+        # Don't embed very short answers
+        if len(answer.split()) < _ANSWER_EMBEDDING_MIN_LENGTH:
+            return sources, 0.0
+        
+        embedding_started = time.monotonic()
+        try:
+            # Attempt to embed the answer
+            answer_embedding = await self._knowledge.embed_text(answer)
+            if not answer_embedding:
+                return sources, 0.0
+        except Exception as e:
+            logger.debug("answer embedding failed: %s; falling back to deterministic scoring", e)
+            return sources, 0.0
+        
+        embedding_latency_ms = (time.monotonic() - embedding_started) * 1000
+        
+        # Score each source against the answer embedding
+        rescored: list[tuple[RetrievedSource, float]] = []
+        for source in sources:
+            # Use snippet as the source text; it's what would be displayed
+            source_text = source.snippet
+            try:
+                source_embedding = await self._knowledge.embed_text(source_text)
+                if not source_embedding:
+                    rescored.append((source, source.score))
+                    continue
+                
+                # Compute semantic similarity (normalized dot product)
+                if len(answer_embedding) != len(source_embedding):
+                    similarity = 0.0
+                else:
+                    dot_product = sum(
+                        a * b for a, b in zip(answer_embedding, source_embedding, strict=True)
+                    )
+                    mag_answer = sum(a * a for a in answer_embedding) ** 0.5
+                    mag_source = sum(b * b for b in source_embedding) ** 0.5
+                    if mag_answer > 0 and mag_source > 0:
+                        similarity = dot_product / (mag_answer * mag_source)
+                    else:
+                        similarity = 0.0
+                
+                if similarity < _ANSWER_SCORE_THRESHOLD:
+                    similarity = 0.0
+                
+                # Combine with existing score: boost strong matches, keep weak ones visible
+                combined_score = source.score + (similarity * _ANSWER_SEMANTIC_WEIGHT)
+                rescored_source = source.model_copy(update={"score": combined_score})
+                rescored.append((rescored_source, similarity))
+            except Exception as e:
+                logger.debug("source embedding failed for %s: %s; keeping original score", 
+                           source.page_id, e)
+                rescored.append((source, 0.0))
+        
+        # Re-select answer sources using combined scores
+        combined_sources = [source for source, _ in rescored]
+        answer_sources = _select_answer_sources(query, combined_sources)
+        
+        return answer_sources, embedding_latency_ms
